@@ -36,11 +36,26 @@ npm run dev
 
 http://localhost:3000 で開けます。
 
-## AI Gateway のAPIキー取得
+## AI Gateway の認証設定
 
-1. https://vercel.com/dashboard/ai にアクセス
-2. 「Create API Key」で新規発行
+オートモードでAIテキスト生成を使うには、次のどちらか一つで認証できます。
+
+### 方法A: APIキー（シンプル）
+
+1. https://vercel.com/ai-gateway にアクセス → チームを選ぶ → 「API Keys」
+   - 直接リンク: https://vercel.com/d?to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys
+2. 「Create Key」で新規発行してコピー
 3. `.env.local` の `AI_GATEWAY_API_KEY` に貼り付け
+
+### 方法B: OIDCトークン（推奨、キー管理不要）
+
+Vercelプロジェクトにリンクすれば、OIDCトークンで自動認証されます。
+
+```bash
+npm i -g vercel@latest
+vercel link          # このリポジトリをVercelプロジェクトと紐付け
+vercel env pull      # .env.local に OIDC トークンが自動で入る（12時間有効）
+```
 
 ローカル開発中は無料クレジットが使えます。本番ではトークンベースの従量課金（Haikuモデルは非常に安価）。
 
