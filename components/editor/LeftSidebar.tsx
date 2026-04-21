@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Image as ImageIcon, Type, Sparkles, Upload, FolderOpen, Palette } from "lucide-react";
+import { Image as ImageIcon, Type, Sparkles, Upload, FolderOpen, Palette, Clipboard } from "lucide-react";
 import { cn, readFileAsDataURL, loadImageSize } from "@/lib/utils";
 import type { SavedThumbnail } from "@/lib/types";
 
@@ -9,6 +9,7 @@ type Tab = "upload" | "text" | "image" | "auto" | "saved";
 
 type Props = {
   onSetBackground: (src: string, width: number, height: number) => void;
+  onPasteBackground: () => Promise<void> | void;
   onAddText: (text?: string, opts?: { fontSize?: number; fill?: string }) => void;
   onAddImage: (src: string, width: number, height: number) => void;
   onAutoGenerate: (product: string, url: string, style: string) => Promise<void>;
@@ -33,7 +34,14 @@ export default function LeftSidebar(props: Props) {
         <TabBtn active={tab === "saved"} onClick={() => setTab("saved")} icon={<FolderOpen className="w-5 h-5" />} label="保存" />
       </div>
       <div className="flex-1 overflow-y-auto p-4">
-        {tab === "upload" && <UploadPanel onSet={props.onSetBackground} bg={props.canvasBg} onBgChange={props.onCanvasBgChange} />}
+        {tab === "upload" && (
+          <UploadPanel
+            onSet={props.onSetBackground}
+            onPaste={props.onPasteBackground}
+            bg={props.canvasBg}
+            onBgChange={props.onCanvasBgChange}
+          />
+        )}
         {tab === "text" && <TextPanel onAdd={props.onAddText} />}
         {tab === "image" && <ImagePanel onAdd={props.onAddImage} />}
         {tab === "auto" && <AutoPanel onGenerate={props.onAutoGenerate} busy={props.autoBusy} />}
@@ -62,23 +70,50 @@ function TabBtn({ active, onClick, icon, label }: { active: boolean; onClick: ()
 
 function UploadPanel({
   onSet,
+  onPaste,
   bg,
   onBgChange,
 }: {
   onSet: (src: string, w: number, h: number) => void;
+  onPaste: () => Promise<void> | void;
   bg: string;
   onBgChange: (c: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFile = async (f: File) => {
+    const src = await readFileAsDataURL(f);
+    const { width, height } = await loadImageSize(src);
+    onSet(src, width, height);
+  };
 
   return (
     <div className="space-y-5">
       <div>
         <h3 className="text-sm font-semibold mb-2 text-zinc-200">背景画像</h3>
-        <p className="text-xs text-zinc-400 mb-3">動画のキャプチャ画像などをアップロードしてください。</p>
+        <p className="text-xs text-zinc-400 mb-3">
+          動画のキャプチャ画像などをアップロード・貼り付けしてください。
+        </p>
         <button
           onClick={() => inputRef.current?.click()}
-          className="w-full h-28 rounded-lg border-2 border-dashed border-zinc-700 hover:border-violet-500 hover:bg-zinc-800/40 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:text-violet-300 transition-colors"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={async (e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer.files?.[0];
+            if (f && f.type.startsWith("image/")) await handleFile(f);
+          }}
+          className={cn(
+            "w-full h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors",
+            dragOver
+              ? "border-violet-500 bg-violet-500/10 text-violet-200"
+              : "border-zinc-700 hover:border-violet-500 hover:bg-zinc-800/40 text-zinc-400 hover:text-violet-300"
+          )}
         >
           <Upload className="w-5 h-5" />
           <span className="text-xs">クリックまたはドラッグで選択</span>
@@ -91,12 +126,22 @@ function UploadPanel({
           onChange={async (e) => {
             const f = e.target.files?.[0];
             if (!f) return;
-            const src = await readFileAsDataURL(f);
-            const { width, height } = await loadImageSize(src);
-            onSet(src, width, height);
+            await handleFile(f);
             if (inputRef.current) inputRef.current.value = "";
           }}
         />
+        <button
+          onClick={() => onPaste()}
+          className="mt-2 w-full px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-100 flex items-center justify-center gap-1.5 border border-zinc-700"
+        >
+          <Clipboard className="w-4 h-4" />
+          クリップボードから貼り付け
+        </button>
+        <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
+          ヒント: <kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-mono text-[10px]">⌘V</kbd>
+          {" "}でどこからでも直接貼り付け可能。QuickTime Playerの「映像をコピー」や
+          スクリーンショット（<kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-mono text-[10px]">⌃⌘⇧4</kbd>）に対応。
+        </p>
       </div>
       <div>
         <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5 text-zinc-200">

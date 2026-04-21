@@ -11,6 +11,7 @@ import { JAPANESE_FONTS, ensureFontsLoaded } from "@/lib/fonts";
 import {
   downloadDataURL,
   loadImageSize,
+  readFileAsDataURL,
   uid,
 } from "@/lib/utils";
 import {
@@ -341,6 +342,70 @@ export default function Editor() {
     [commit]
   );
 
+  // --- Clipboard paste ---
+  // Global Cmd+V → set image as background. Works with QuickTime Player's
+  // "映像をコピー", screenshots, browser "画像をコピー", etc.
+  useEffect(() => {
+    const handler = async (e: ClipboardEvent) => {
+      if (textEdit) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+        return;
+      }
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          try {
+            const src = await readFileAsDataURL(file);
+            const { width, height } = await loadImageSize(src);
+            setBackground(src, width, height);
+          } catch (err) {
+            console.error("Paste failed:", err);
+            alert("クリップボードの画像を読み込めませんでした");
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+  }, [setBackground, textEdit]);
+
+  // Explicit "paste from clipboard" action (button-triggered). Uses the async
+  // Clipboard API which requires a user gesture and may prompt for permission.
+  const pasteFromClipboard = useCallback(async () => {
+    try {
+      if (!navigator.clipboard?.read) {
+        alert("このブラウザはクリップボードAPIに対応していません。⌘V で直接貼り付けてください。");
+        return;
+      }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith("image/"));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        const src = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        const { width, height } = await loadImageSize(src);
+        setBackground(src, width, height);
+        return;
+      }
+      alert("クリップボードに画像がありません。");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`クリップボードの読み取りに失敗しました: ${msg}\n⌘V で直接貼り付けてみてください。`);
+    }
+  }, [setBackground]);
+
   // --- Export / Save ---
 
   const makeDataURL = useCallback(
@@ -554,6 +619,7 @@ export default function Editor() {
       <div className="flex-1 min-h-0 flex">
         <LeftSidebar
           onSetBackground={setBackground}
+          onPasteBackground={pasteFromClipboard}
           onAddText={addText}
           onAddImage={addImage}
           onAutoGenerate={autoGenerate}
