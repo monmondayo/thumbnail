@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -11,9 +11,20 @@ import {
   Image as ImageIcon,
   Type,
   Lock,
+  Shapes,
 } from "lucide-react";
-import type { EditorElement, TextElement } from "@/lib/types";
-import { JAPANESE_FONTS } from "@/lib/fonts";
+import type {
+  EditorElement,
+  GradientConfig,
+  ShapeElement,
+  TextElement,
+} from "@/lib/types";
+import {
+  JAPANESE_FONTS,
+  GRADIENT_PRESETS,
+  derivedPresetsFromBase,
+  type GradientPreset,
+} from "@/lib/fonts";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -43,7 +54,12 @@ export default function RightPanel({
     <div className="w-[300px] shrink-0 border-l border-zinc-800 bg-zinc-900 flex flex-col">
       <div className="flex-1 overflow-y-auto">
         {selected ? (
-          <Properties element={selected} onUpdate={(p) => onUpdate(selected.id, p)} />
+          <Properties
+            element={selected}
+            onUpdate={(p) => onUpdate(selected.id, p)}
+            onDelete={() => onDelete(selected.id)}
+            onDuplicate={() => onDuplicate(selected.id)}
+          />
         ) : (
           <div className="p-4 text-xs text-zinc-500">
             要素を選択するとここにプロパティが表示されます。
@@ -102,6 +118,8 @@ function LayerRow({
   const label =
     el.type === "text"
       ? el.text.slice(0, 20) || "テキスト"
+      : el.type === "shape"
+      ? el.shape === "ellipse" ? "楕円" : "四角形"
       : el.isBackground
       ? "背景画像"
       : "画像";
@@ -119,12 +137,14 @@ function LayerRow({
           onToggle();
         }}
         className="text-zinc-400 hover:text-zinc-200"
-        title={el.visible ? "非表示にする" : "表示する"}
+        title={el.visible ? "非表示" : "表示"}
       >
         {el.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
       </button>
       {el.type === "text" ? (
         <Type className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+      ) : el.type === "shape" ? (
+        <Shapes className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       ) : el.isBackground ? (
         <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       ) : (
@@ -132,62 +152,82 @@ function LayerRow({
       )}
       <span className="flex-1 truncate">{label}</span>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onUp();
-          }}
-          className="p-1 hover:bg-zinc-700 rounded"
-          title="上へ"
-        >
-          <ArrowUp className="w-3 h-3" />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDown();
-          }}
-          className="p-1 hover:bg-zinc-700 rounded"
-          title="下へ"
-        >
-          <ArrowDown className="w-3 h-3" />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicate();
-          }}
-          className="p-1 hover:bg-zinc-700 rounded"
-          title="複製"
-        >
-          <Copy className="w-3 h-3" />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="p-1 hover:bg-rose-500/20 rounded text-rose-300"
+        <IconBtn icon={<ArrowUp className="w-3 h-3" />} onClick={onUp} title="上へ" />
+        <IconBtn icon={<ArrowDown className="w-3 h-3" />} onClick={onDown} title="下へ" />
+        <IconBtn icon={<Copy className="w-3 h-3" />} onClick={onDuplicate} title="複製" />
+        <IconBtn
+          icon={<Trash2 className="w-3 h-3" />}
+          onClick={onDelete}
           title="削除"
-        >
-          <Trash2 className="w-3 h-3" />
-        </button>
+          className="hover:bg-rose-500/20 text-rose-300"
+        />
       </div>
     </li>
+  );
+}
+
+function IconBtn({
+  icon,
+  onClick,
+  title,
+  className,
+}: {
+  icon: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  className?: string;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn("p-1 hover:bg-zinc-700 rounded", className)}
+      title={title}
+    >
+      {icon}
+    </button>
   );
 }
 
 function Properties({
   element,
   onUpdate,
+  onDelete,
+  onDuplicate,
 }: {
   element: EditorElement;
   onUpdate: (patch: Partial<EditorElement>) => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
 }) {
-  if (element.type === "text") {
-    return <TextProperties element={element} onUpdate={onUpdate} />;
-  }
-  return <ImageProperties element={element} onUpdate={onUpdate} />;
+  return (
+    <div>
+      <div className="px-4 pt-3 pb-2 flex gap-2">
+        <button
+          onClick={onDuplicate}
+          className="flex-1 flex items-center justify-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded px-2 py-1.5"
+        >
+          <Copy className="w-3.5 h-3.5" />
+          複製 <kbd className="font-mono text-[10px] text-zinc-500">⌘D</kbd>
+        </button>
+        <button
+          onClick={onDelete}
+          className="flex items-center justify-center gap-1 text-xs bg-zinc-800 hover:bg-rose-500/20 text-rose-300 rounded px-3 py-1.5"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {element.type === "text" ? (
+        <TextProperties element={element} onUpdate={onUpdate} />
+      ) : element.type === "shape" ? (
+        <ShapeProperties element={element} onUpdate={onUpdate} />
+      ) : (
+        <ImageProperties element={element} onUpdate={onUpdate} />
+      )}
+    </div>
+  );
 }
 
 function TextProperties({
@@ -198,7 +238,7 @@ function TextProperties({
   onUpdate: (patch: Partial<EditorElement>) => void;
 }) {
   return (
-    <div className="p-4 space-y-5">
+    <div className="px-4 pb-4 space-y-5">
       <Section title="テキスト">
         <textarea
           value={element.text}
@@ -247,7 +287,7 @@ function TextProperties({
         <input
           type="range"
           min={12}
-          max={300}
+          max={320}
           value={element.fontSize}
           onChange={(e) => onUpdate({ fontSize: Number(e.target.value) })}
           className="w-full"
@@ -266,9 +306,27 @@ function TextProperties({
         />
       </Section>
 
+      <Section title={`字間 ${(element.letterSpacing ?? 0).toFixed(1)}px`}>
+        <input
+          type="range"
+          min={-5}
+          max={30}
+          step={0.5}
+          value={element.letterSpacing ?? 0}
+          onChange={(e) => onUpdate({ letterSpacing: Number(e.target.value) })}
+          className="w-full"
+        />
+      </Section>
+
       <Section title="文字色">
         <ColorInput value={element.fill} onChange={(v) => onUpdate({ fill: v })} />
       </Section>
+
+      <GradientSection
+        gradient={element.gradient}
+        baseColor={element.fill}
+        onChange={(g) => onUpdate({ gradient: g })}
+      />
 
       <Section title="輪郭線">
         <div className="space-y-2">
@@ -332,6 +390,8 @@ function TextProperties({
         )}
       </Section>
 
+      <OpacitySection element={element} onUpdate={onUpdate} />
+
       <Section title="折り返し幅">
         <input
           type="number"
@@ -346,6 +406,124 @@ function TextProperties({
   );
 }
 
+function ShapeProperties({
+  element,
+  onUpdate,
+}: {
+  element: ShapeElement;
+  onUpdate: (patch: Partial<EditorElement>) => void;
+}) {
+  return (
+    <div className="px-4 pb-4 space-y-5">
+      <Section title="形状">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => onUpdate({ shape: "rect" })}
+            className={cn(
+              "py-2 rounded border text-xs",
+              element.shape === "rect"
+                ? "bg-violet-600/20 border-violet-500 text-violet-100"
+                : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"
+            )}
+          >
+            四角形
+          </button>
+          <button
+            onClick={() => onUpdate({ shape: "ellipse" })}
+            className={cn(
+              "py-2 rounded border text-xs",
+              element.shape === "ellipse"
+                ? "bg-violet-600/20 border-violet-500 text-violet-100"
+                : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"
+            )}
+          >
+            楕円
+          </button>
+        </div>
+      </Section>
+
+      <Section title="サイズ">
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <label>
+            <span className="block text-zinc-500 mb-0.5">幅</span>
+            <input
+              type="number"
+              value={Math.round(element.width)}
+              onChange={(e) => onUpdate({ width: Number(e.target.value) })}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1"
+            />
+          </label>
+          <label>
+            <span className="block text-zinc-500 mb-0.5">高さ</span>
+            <input
+              type="number"
+              value={Math.round(element.height)}
+              onChange={(e) => onUpdate({ height: Number(e.target.value) })}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1"
+            />
+          </label>
+        </div>
+      </Section>
+
+      {element.shape === "rect" && (
+        <Section title={`角丸 ${element.cornerRadius}px`}>
+          <input
+            type="range"
+            min={0}
+            max={200}
+            value={element.cornerRadius}
+            onChange={(e) => onUpdate({ cornerRadius: Number(e.target.value) })}
+            className="w-full"
+          />
+          <div className="flex gap-1 mt-1">
+            {[0, 8, 16, 32, 100].map((r) => (
+              <button
+                key={r}
+                onClick={() => onUpdate({ cornerRadius: r })}
+                className="px-2 py-0.5 text-[10px] bg-zinc-800 hover:bg-zinc-700 rounded"
+              >
+                {r === 100 ? "Pill" : r}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section title="塗りつぶし">
+        <ColorInput value={element.fill} onChange={(v) => onUpdate({ fill: v })} />
+      </Section>
+
+      <GradientSection
+        gradient={element.gradient}
+        baseColor={element.fill}
+        onChange={(g) => onUpdate({ gradient: g })}
+      />
+
+      <Section title="枠線">
+        <div className="space-y-2">
+          <ColorInput value={element.stroke} onChange={(v) => onUpdate({ stroke: v })} />
+          <div>
+            <div className="text-[10px] text-zinc-500 mb-0.5">太さ {element.strokeWidth}px</div>
+            <input
+              type="range"
+              min={0}
+              max={30}
+              step={0.5}
+              value={element.strokeWidth}
+              onChange={(e) => onUpdate({ strokeWidth: Number(e.target.value) })}
+              className="w-full"
+            />
+          </div>
+        </div>
+      </Section>
+
+      <OpacitySection element={element} onUpdate={onUpdate} />
+
+      <Transform element={element} onUpdate={onUpdate} />
+    </div>
+  );
+}
+
 function ImageProperties({
   element,
   onUpdate,
@@ -354,15 +532,245 @@ function ImageProperties({
   onUpdate: (patch: Partial<EditorElement>) => void;
 }) {
   return (
-    <div className="p-4 space-y-5">
+    <div className="px-4 pb-4 space-y-5">
       <Section title="画像">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={element.src} alt="" className="w-full rounded border border-zinc-800" />
         <p className="text-[10px] text-zinc-500 mt-1">
           {Math.round(element.width)}×{Math.round(element.height)} px
         </p>
       </Section>
+      <Section title={`角丸 ${element.cornerRadius ?? 0}px`}>
+        <input
+          type="range"
+          min={0}
+          max={200}
+          value={element.cornerRadius ?? 0}
+          onChange={(e) => onUpdate({ cornerRadius: Number(e.target.value) })}
+          className="w-full"
+        />
+      </Section>
+      <OpacitySection element={element} onUpdate={onUpdate} />
       <Transform element={element} onUpdate={onUpdate} />
     </div>
+  );
+}
+
+function OpacitySection({
+  element,
+  onUpdate,
+}: {
+  element: EditorElement;
+  onUpdate: (patch: Partial<EditorElement>) => void;
+}) {
+  const v = element.opacity ?? 1;
+  return (
+    <Section title={`不透明度 ${Math.round(v * 100)}%`}>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={v}
+        onChange={(e) => onUpdate({ opacity: Number(e.target.value) })}
+        className="w-full"
+      />
+    </Section>
+  );
+}
+
+function GradientSection({
+  gradient,
+  baseColor,
+  onChange,
+}: {
+  gradient: GradientConfig | undefined;
+  baseColor: string;
+  onChange: (g: GradientConfig | undefined) => void;
+}) {
+  const enabled = gradient?.enabled ?? false;
+  const g: GradientConfig =
+    gradient ?? {
+      enabled: false,
+      type: "linear",
+      angle: 90,
+      stops: [
+        { offset: 0, color: baseColor },
+        { offset: 1, color: "#000000" },
+      ],
+    };
+  const toggle = (v: boolean) => onChange({ ...g, enabled: v });
+  const setStops = (stops: { offset: number; color: string }[]) =>
+    onChange({ ...g, enabled: true, stops });
+  const setAngle = (angle: number) => onChange({ ...g, enabled: true, angle });
+  const setType = (type: "linear" | "radial") =>
+    onChange({ ...g, enabled: true, type });
+
+  const applyPreset = (p: GradientPreset) => {
+    const stops = p.colors.map((c, i, arr) => ({
+      offset: arr.length === 1 ? 0 : i / (arr.length - 1),
+      color: c,
+    }));
+    onChange({
+      enabled: true,
+      type: g.type,
+      angle: p.angle ?? g.angle,
+      stops,
+    });
+  };
+
+  const derived = derivedPresetsFromBase(baseColor);
+
+  return (
+    <Section title="グラデーション">
+      <label className="flex items-center gap-2 text-xs mb-2">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+        グラデーションを有効化
+      </label>
+
+      {enabled && (
+        <div className="space-y-3">
+          {/* Type toggle */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setType("linear")}
+              className={cn(
+                "flex-1 py-1.5 rounded border text-[11px]",
+                g.type === "linear"
+                  ? "bg-violet-600/20 border-violet-500 text-violet-100"
+                  : "bg-zinc-800 border-zinc-700"
+              )}
+            >
+              直線
+            </button>
+            <button
+              onClick={() => setType("radial")}
+              className={cn(
+                "flex-1 py-1.5 rounded border text-[11px]",
+                g.type === "radial"
+                  ? "bg-violet-600/20 border-violet-500 text-violet-100"
+                  : "bg-zinc-800 border-zinc-700"
+              )}
+            >
+              放射状
+            </button>
+          </div>
+
+          {g.type === "linear" && (
+            <div>
+              <div className="text-[10px] text-zinc-500 mb-0.5">角度 {g.angle}°</div>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={g.angle}
+                onChange={(e) => setAngle(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+          )}
+
+          {/* Color stops editor */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-zinc-500">カラーストップ</div>
+            {g.stops.map((s, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={s.color}
+                  onChange={(e) => {
+                    const next = [...g.stops];
+                    next[i] = { ...s, color: e.target.value };
+                    setStops(next);
+                  }}
+                  className="w-8 h-8 rounded bg-transparent border border-zinc-700 cursor-pointer"
+                />
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={s.offset}
+                  onChange={(e) => {
+                    const next = [...g.stops];
+                    next[i] = { ...s, offset: Number(e.target.value) };
+                    setStops(next);
+                  }}
+                  className="flex-1"
+                />
+                <span className="text-[10px] text-zinc-500 w-8 font-mono">
+                  {Math.round(s.offset * 100)}
+                </span>
+                {g.stops.length > 2 && (
+                  <button
+                    onClick={() => setStops(g.stops.filter((_, j) => j !== i))}
+                    className="p-0.5 text-rose-300 hover:bg-rose-500/10 rounded"
+                    title="削除"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {g.stops.length < 6 && (
+              <button
+                onClick={() =>
+                  setStops([
+                    ...g.stops,
+                    { offset: 1, color: "#ffffff" },
+                  ])
+                }
+                className="w-full text-[11px] py-1 bg-zinc-800 hover:bg-zinc-700 rounded border border-zinc-700"
+              >
+                + ストップ追加
+              </button>
+            )}
+          </div>
+
+          {/* Base-derived presets */}
+          <div>
+            <div className="text-[10px] text-zinc-500 mb-1">
+              選択色「{baseColor}」ベースの候補
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {derived.map((p, i) => (
+                <PresetSwatch key={`d-${i}`} preset={p} onClick={() => applyPreset(p)} />
+              ))}
+            </div>
+          </div>
+
+          {/* Classic presets */}
+          <div>
+            <div className="text-[10px] text-zinc-500 mb-1">定番パターン</div>
+            <div className="grid grid-cols-3 gap-1">
+              {GRADIENT_PRESETS.map((p, i) => (
+                <PresetSwatch key={`p-${i}`} preset={p} onClick={() => applyPreset(p)} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function PresetSwatch({ preset, onClick }: { preset: GradientPreset; onClick: () => void }) {
+  const bg = `linear-gradient(${(preset.angle ?? 90) - 90}deg, ${preset.colors.join(",")})`;
+  return (
+    <button
+      onClick={onClick}
+      className="h-8 rounded border border-zinc-700 hover:border-violet-500 relative overflow-hidden text-[10px] text-white/90"
+      style={{ background: bg }}
+      title={preset.label}
+    >
+      <span className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 transition-colors">
+        {preset.label}
+      </span>
+    </button>
   );
 }
 
@@ -440,18 +848,30 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function ColorInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [local, setLocal] = useState(value);
+  // Keep local state in sync when an outside update happens (e.g. template apply)
+  if (local !== value && !document.activeElement?.matches("input")) {
+    setTimeout(() => setLocal(value), 0);
+  }
   return (
     <div className="flex items-center gap-2">
       <input
         type="color"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          setLocal(e.target.value);
+          onChange(e.target.value);
+        }}
         className="w-9 h-9 rounded cursor-pointer bg-transparent border border-zinc-700"
       />
       <input
         type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={local}
+        onChange={(e) => {
+          setLocal(e.target.value);
+          if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value);
+        }}
+        onBlur={() => setLocal(value)}
         className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono"
       />
     </div>

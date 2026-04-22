@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import type Konva from "konva";
 import TextEditOverlay from "./TextEditOverlay";
 import Toolbar from "./Toolbar";
-import LeftSidebar from "./LeftSidebar";
+import LeftSidebar, { type AutoResult } from "./LeftSidebar";
 import RightPanel from "./RightPanel";
 import { JAPANESE_FONTS, ensureFontsLoaded } from "@/lib/fonts";
 import {
@@ -26,8 +26,11 @@ import type {
   EditorState,
   ImageElement,
   SavedThumbnail,
+  ShapeElement,
+  ShapeKind,
   TextElement,
 } from "@/lib/types";
+import { findTemplate } from "@/lib/templates";
 
 const Canvas = dynamic(() => import("./Canvas"), { ssr: false });
 
@@ -62,12 +65,40 @@ const defaultText = (overrides: Partial<TextElement> = {}): TextElement => ({
   align: "center",
   width: 600,
   lineHeight: 1.15,
+  letterSpacing: 0,
   shadowEnabled: true,
   shadowColor: "#000000",
   shadowBlur: 14,
   shadowOffsetX: 4,
   shadowOffsetY: 4,
   shadowOpacity: 0.55,
+  opacity: 1,
+  ...overrides,
+});
+
+const defaultShape = (overrides: Partial<ShapeElement> = {}): ShapeElement => ({
+  id: uid(),
+  type: "shape",
+  shape: "rect",
+  x: (CANVAS_W - (overrides.width ?? 400)) / 2,
+  y: (CANVAS_H - (overrides.height ?? 200)) / 2,
+  width: 400,
+  height: 200,
+  rotation: 0,
+  scaleX: 1,
+  scaleY: 1,
+  visible: true,
+  fill: "#fde047",
+  stroke: "transparent",
+  strokeWidth: 0,
+  cornerRadius: 24,
+  opacity: 1,
+  shadowEnabled: false,
+  shadowColor: "#000000",
+  shadowBlur: 20,
+  shadowOffsetX: 0,
+  shadowOffsetY: 6,
+  shadowOpacity: 0.3,
   ...overrides,
 });
 
@@ -155,7 +186,7 @@ export default function Editor() {
     return () => ro.disconnect();
   }, []);
 
-  // Preload Japanese fonts into document.fonts so Konva can use them
+  // Preload Japanese fonts
   useEffect(() => {
     let mounted = true;
     ensureFontsLoaded().then(() => {
@@ -166,36 +197,10 @@ export default function Editor() {
     };
   }, []);
 
-  // When fonts finish loading, redraw stage so text reflects actual glyphs
   useEffect(() => {
     if (!fontsReady) return;
     stageRef.current?.batchDraw();
   }, [fontsReady]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (textEdit) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      } else if (mod && (e.key === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
-        e.preventDefault();
-        redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        e.preventDefault();
-        deleteElement(selectedId);
-      } else if (e.key === "Escape") {
-        setSelectedId(null);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, undo, redo, textEdit]);
 
   // --- Element actions ---
 
@@ -230,7 +235,29 @@ export default function Editor() {
         scaleX: 1,
         scaleY: 1,
         visible: true,
+        opacity: 1,
       };
+      commit((s) => ({ ...s, elements: [...s.elements, el] }));
+      setSelectedId(el.id);
+    },
+    [commit]
+  );
+
+  const addShape = useCallback(
+    (
+      shape: ShapeKind,
+      opts?: Partial<{ fill: string; cornerRadius: number; width: number; height: number }>
+    ) => {
+      const el = defaultShape({
+        shape,
+        ...(opts?.fill ? { fill: opts.fill } : {}),
+        ...(opts?.cornerRadius !== undefined ? { cornerRadius: opts.cornerRadius } : {}),
+        ...(opts?.width ? { width: opts.width } : {}),
+        ...(opts?.height ? { height: opts.height } : {}),
+      });
+      // Re-center based on provided dimensions
+      el.x = (CANVAS_W - el.width) / 2;
+      el.y = (CANVAS_H - el.height) / 2;
       commit((s) => ({ ...s, elements: [...s.elements, el] }));
       setSelectedId(el.id);
     },
@@ -239,7 +266,6 @@ export default function Editor() {
 
   const setBackground = useCallback(
     (src: string, w: number, h: number) => {
-      // Fit image to cover the canvas
       const scale = Math.max(CANVAS_W / w, CANVAS_H / h);
       const width = w * scale;
       const height = h * scale;
@@ -256,6 +282,7 @@ export default function Editor() {
         scaleY: 1,
         visible: true,
         isBackground: true,
+        opacity: 1,
       };
       commit((s) => {
         const filtered = s.elements.filter(
@@ -290,6 +317,7 @@ export default function Editor() {
 
   const duplicateElement = useCallback(
     (id: string) => {
+      let newId: string | null = null;
       commit((s) => {
         const el = s.elements.find((e) => e.id === id);
         if (!el) return s;
@@ -300,8 +328,10 @@ export default function Editor() {
           y: el.y + 30,
           ...(el.type === "image" ? { isBackground: false } : {}),
         };
+        newId = copy.id;
         return { ...s, elements: [...s.elements, copy] };
       });
+      if (newId) setSelectedId(newId);
     },
     [commit]
   );
@@ -342,9 +372,283 @@ export default function Editor() {
     [commit]
   );
 
-  // --- Clipboard paste ---
-  // Global Cmd+V → set image as background. Works with QuickTime Player's
-  // "映像をコピー", screenshots, browser "画像をコピー", etc.
+  // --- Template application ---
+  const applyTemplate = useCallback(
+    (templateId: string, phrases?: string[]) => {
+      const tpl = findTemplate(templateId);
+      if (!tpl) return;
+      const newEls = tpl.build({
+        canvasWidth: CANVAS_W,
+        canvasHeight: CANVAS_H,
+        uid,
+        phrases,
+      });
+      commit((s) => {
+        // Keep only background image; replace all other elements
+        const bg = s.elements.filter((e) => e.type === "image" && e.isBackground);
+        return { ...s, elements: [...bg, ...newEls] };
+      });
+      setSelectedId(null);
+    },
+    [commit]
+  );
+
+  // --- Auto mode ---
+  const autoGenerate = useCallback(
+    async (opts: {
+      product: string;
+      url: string;
+      style: string;
+      mode: "research" | "simple";
+    }): Promise<AutoResult | null> => {
+      setAutoBusy(true);
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(opts),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error ?? `Status ${res.status}`);
+        }
+        return (await res.json()) as AutoResult;
+      } catch (err) {
+        alert(`AI生成に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      } finally {
+        setAutoBusy(false);
+      }
+    },
+    []
+  );
+
+  const applyAutoResult = useCallback(
+    (res: AutoResult, templateId?: string) => {
+      const headline = res.headline ?? res.mainText ?? "";
+      const sub = res.subHeadline ?? res.subText ?? "";
+      const features = res.features ?? [];
+      const stats = res.stats ?? [];
+      const verdicts = res.verdicts ?? [];
+      const accent = res.accent ?? res.accentText ?? "";
+
+      if (templateId) {
+        // Feed the phrase list into the template in a sensible order
+        const phrases = [
+          headline,
+          sub,
+          ...features,
+          ...stats,
+          ...verdicts,
+          accent,
+        ].filter((p) => p && p.trim());
+        applyTemplate(templateId, phrases);
+        return;
+      }
+
+      // No template: lay them out freeform in distinct zones
+      commit((s) => {
+        // Drop existing non-background elements
+        const bg = s.elements.filter((e) => e.type === "image" && e.isBackground);
+        const elems: EditorElement[] = [...bg];
+
+        if (headline) {
+          elems.push(
+            defaultText({
+              text: headline,
+              fontSize: 160,
+              fontFamily: '"Dela Gothic One", sans-serif',
+              fill: "#fde047",
+              stroke: "#0b0b10",
+              strokeWidth: 14,
+              width: CANVAS_W - 160,
+              x: 80,
+              y: 140,
+              align: "left",
+            })
+          );
+        }
+        if (sub) {
+          elems.push(
+            defaultText({
+              text: sub,
+              fontSize: 56,
+              fontFamily: '"M PLUS Rounded 1c", sans-serif',
+              fill: "#ffffff",
+              stroke: "#000000",
+              strokeWidth: 6,
+              width: CANVAS_W - 160,
+              x: 80,
+              y: 360,
+              align: "left",
+              fontStyle: "bold",
+            })
+          );
+        }
+
+        // Feature pills in the lower band
+        const featureColors = ["#fde047", "#fb923c", "#22c55e", "#60a5fa", "#ec4899", "#a78bfa"];
+        features.slice(0, 4).forEach((f, i) => {
+          const pillW = 300;
+          const pillH = 80;
+          const x = 80 + (i % 2) * (pillW + 30);
+          const y = 440 + Math.floor(i / 2) * (pillH + 20);
+          elems.push({
+            id: uid(),
+            type: "shape",
+            shape: "rect",
+            x,
+            y,
+            width: pillW,
+            height: pillH,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+            visible: true,
+            fill: featureColors[i % featureColors.length],
+            stroke: "transparent",
+            strokeWidth: 0,
+            cornerRadius: 100,
+            opacity: 1,
+            shadowEnabled: true,
+            shadowColor: "#000000",
+            shadowBlur: 18,
+            shadowOffsetX: 0,
+            shadowOffsetY: 4,
+            shadowOpacity: 0.45,
+          } satisfies ShapeElement);
+          elems.push(
+            defaultText({
+              text: f,
+              fontSize: 42,
+              fontFamily: '"M PLUS Rounded 1c", sans-serif',
+              fontStyle: "bold",
+              fill: "#0f0f10",
+              stroke: "transparent",
+              strokeWidth: 0,
+              width: pillW,
+              x,
+              y: y + 16,
+              align: "center",
+              shadowEnabled: false,
+            })
+          );
+        });
+
+        // Stats — top-right corner stacked
+        stats.slice(0, 2).forEach((st, i) => {
+          elems.push(
+            defaultText({
+              text: st,
+              fontSize: 56,
+              fontFamily: '"Dela Gothic One", sans-serif',
+              fill: "#fff",
+              stroke: "#dc2626",
+              strokeWidth: 8,
+              width: 520,
+              x: CANVAS_W - 540,
+              y: 40 + i * 80,
+              align: "right",
+            })
+          );
+        });
+
+        // Verdict — bottom-right sticker
+        if (verdicts[0]) {
+          elems.push({
+            id: uid(),
+            type: "shape",
+            shape: "ellipse",
+            x: CANVAS_W - 260,
+            y: CANVAS_H - 260,
+            width: 220,
+            height: 220,
+            rotation: -8,
+            scaleX: 1,
+            scaleY: 1,
+            visible: true,
+            fill: "#dc2626",
+            stroke: "transparent",
+            strokeWidth: 0,
+            cornerRadius: 0,
+            opacity: 1,
+            shadowEnabled: true,
+            shadowColor: "#000000",
+            shadowBlur: 20,
+            shadowOffsetX: 0,
+            shadowOffsetY: 6,
+            shadowOpacity: 0.5,
+          } satisfies ShapeElement);
+          elems.push(
+            defaultText({
+              text: verdicts[0],
+              fontSize: 40,
+              fontFamily: '"Dela Gothic One", sans-serif',
+              fill: "#ffffff",
+              stroke: "transparent",
+              strokeWidth: 0,
+              width: 220,
+              x: CANVAS_W - 260,
+              y: CANVAS_H - 180,
+              rotation: -8,
+              align: "center",
+              shadowEnabled: false,
+            })
+          );
+        }
+
+        // Accent — top-left corner
+        if (accent) {
+          elems.push({
+            id: uid(),
+            type: "shape",
+            shape: "rect",
+            x: -10,
+            y: 30,
+            width: 260,
+            height: 70,
+            rotation: -4,
+            scaleX: 1,
+            scaleY: 1,
+            visible: true,
+            fill: "#0f172a",
+            stroke: "#fde047",
+            strokeWidth: 4,
+            cornerRadius: 0,
+            opacity: 1,
+            shadowEnabled: false,
+            shadowColor: "#000",
+            shadowBlur: 0,
+            shadowOffsetX: 0,
+            shadowOffsetY: 0,
+            shadowOpacity: 0,
+          } satisfies ShapeElement);
+          elems.push(
+            defaultText({
+              text: accent,
+              fontSize: 40,
+              fontFamily: '"Dela Gothic One", sans-serif',
+              fill: "#fde047",
+              stroke: "transparent",
+              strokeWidth: 0,
+              width: 260,
+              x: -10,
+              y: 42,
+              rotation: -4,
+              align: "center",
+              shadowEnabled: false,
+            })
+          );
+        }
+
+        return { ...s, elements: elems };
+      });
+      setSelectedId(null);
+    },
+    [commit, applyTemplate]
+  );
+
+  // --- Clipboard paste → background ---
   useEffect(() => {
     const handler = async (e: ClipboardEvent) => {
       if (textEdit) return;
@@ -376,8 +680,6 @@ export default function Editor() {
     return () => window.removeEventListener("paste", handler);
   }, [setBackground, textEdit]);
 
-  // Explicit "paste from clipboard" action (button-triggered). Uses the async
-  // Clipboard API which requires a user gesture and may prompt for permission.
   const pasteFromClipboard = useCallback(async () => {
     try {
       if (!navigator.clipboard?.read) {
@@ -406,6 +708,34 @@ export default function Editor() {
     }
   }, [setBackground]);
 
+  // --- Keyboard shortcuts ---
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (textEdit) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (mod && (e.key === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
+        e.preventDefault();
+        redo();
+      } else if (mod && e.key.toLowerCase() === "d" && selectedId) {
+        e.preventDefault();
+        duplicateElement(selectedId);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        e.preventDefault();
+        deleteElement(selectedId);
+      } else if (e.key === "Escape") {
+        setSelectedId(null);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, undo, redo, textEdit]);
+
   // --- Export / Save ---
 
   const makeDataURL = useCallback(
@@ -425,7 +755,6 @@ export default function Editor() {
   const exportImage = useCallback(
     (format: "png" | "jpeg") => {
       setSelectedId(null);
-      // Wait a frame for transformer to disappear
       requestAnimationFrame(() => {
         const mime = format === "png" ? "image/png" : "image/jpeg";
         const data = makeDataURL(mime);
@@ -489,85 +818,6 @@ export default function Editor() {
     setName("無題のサムネイル");
   }, [commit]);
 
-  // --- Auto mode ---
-  const autoGenerate = useCallback(
-    async (product: string, url: string, style: string) => {
-      setAutoBusy(true);
-      try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ product, url, style }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error ?? `Status ${res.status}`);
-        }
-        const data = (await res.json()) as {
-          mainText: string;
-          subText?: string;
-          accentText?: string;
-        };
-
-        commit((s) => {
-          // Remove previously auto-generated text layers
-          const rest = s.elements.filter((e) => !(e.type === "text" && (e as TextElement & { auto?: boolean }).auto));
-          const main: TextElement = {
-            ...defaultText({
-              text: data.mainText,
-              fontSize: 150,
-              fontFamily: '"Dela Gothic One", sans-serif',
-              fill: "#fde047",
-              stroke: "#0b0b10",
-              strokeWidth: 12,
-              width: CANVAS_W - 160,
-            }),
-            x: 80,
-            y: 180,
-          };
-          const elems: EditorElement[] = [...rest, main];
-          if (data.subText) {
-            elems.push({
-              ...defaultText({
-                text: data.subText,
-                fontSize: 56,
-                fontFamily: '"M PLUS Rounded 1c", sans-serif',
-                fill: "#ffffff",
-                stroke: "#000000",
-                strokeWidth: 6,
-                width: CANVAS_W - 160,
-                fontStyle: "bold",
-              }),
-              x: 80,
-              y: 520,
-            });
-          }
-          if (data.accentText) {
-            elems.push({
-              ...defaultText({
-                text: data.accentText,
-                fontSize: 44,
-                fontFamily: '"RocknRoll One", sans-serif',
-                fill: "#fb7185",
-                stroke: "#000000",
-                strokeWidth: 4,
-                width: 500,
-              }),
-              x: CANVAS_W - 560,
-              y: 60,
-            });
-          }
-          return { ...s, elements: elems };
-        });
-      } catch (err) {
-        alert(`AI生成に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setAutoBusy(false);
-      }
-    },
-    [commit]
-  );
-
   // --- Inline text editing ---
   const startTextEdit = useCallback(
     (id: string, rect: { x: number; y: number; width: number; height: number; rotation: number }) => {
@@ -622,7 +872,10 @@ export default function Editor() {
           onPasteBackground={pasteFromClipboard}
           onAddText={addText}
           onAddImage={addImage}
+          onAddShape={addShape}
+          onApplyTemplate={applyTemplate}
           onAutoGenerate={autoGenerate}
+          onApplyAutoResult={applyAutoResult}
           saved={saved}
           onLoadSaved={load}
           onDeleteSaved={removeSaved}
@@ -688,7 +941,7 @@ export default function Editor() {
         />
       </div>
 
-      {/* Font preload (so browser eagerly loads the webfonts for Konva) */}
+      {/* Font preload */}
       <div aria-hidden className="font-preload">
         {JAPANESE_FONTS.map((f) => (
           <span key={f.family} style={{ fontFamily: f.cssFamily }}>
@@ -696,7 +949,6 @@ export default function Editor() {
           </span>
         ))}
       </div>
-      {/* historyTick unused marker to keep hook deps correct */}
       <span hidden>{historyTick}</span>
     </div>
   );

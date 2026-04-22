@@ -1,18 +1,59 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Image as ImageIcon, Type, Sparkles, Upload, FolderOpen, Palette, Clipboard } from "lucide-react";
+import {
+  Image as ImageIcon,
+  Type,
+  Sparkles,
+  Upload,
+  FolderOpen,
+  Palette,
+  Clipboard,
+  Shapes,
+  LayoutTemplate,
+  Square,
+  Circle,
+  Loader2,
+} from "lucide-react";
 import { cn, readFileAsDataURL, loadImageSize } from "@/lib/utils";
-import type { SavedThumbnail } from "@/lib/types";
+import type { SavedThumbnail, ShapeKind } from "@/lib/types";
+import {
+  TEMPLATES,
+  LAYOUT_META,
+  DEFAULT_TEMPLATES_PER_LAYOUT,
+  type TemplateDef,
+} from "@/lib/templates";
 
-type Tab = "upload" | "text" | "image" | "auto" | "saved";
+type Tab = "upload" | "text" | "image" | "shape" | "template" | "auto" | "saved";
+
+export type AutoResult = {
+  mode: "research" | "simple";
+  headline?: string;
+  subHeadline?: string;
+  mainText?: string;
+  subText?: string;
+  features?: string[];
+  stats?: string[];
+  verdicts?: string[];
+  accent?: string;
+  accentText?: string;
+  category?: string;
+};
 
 type Props = {
   onSetBackground: (src: string, width: number, height: number) => void;
   onPasteBackground: () => Promise<void> | void;
   onAddText: (text?: string, opts?: { fontSize?: number; fill?: string }) => void;
   onAddImage: (src: string, width: number, height: number) => void;
-  onAutoGenerate: (product: string, url: string, style: string) => Promise<void>;
+  onAddShape: (shape: ShapeKind, opts?: Partial<{ fill: string; cornerRadius: number; width: number; height: number }>) => void;
+  onApplyTemplate: (templateId: string, phrases?: string[]) => void;
+  onAutoGenerate: (opts: {
+    product: string;
+    url: string;
+    style: string;
+    mode: "research" | "simple";
+  }) => Promise<AutoResult | null>;
+  onApplyAutoResult: (res: AutoResult, templateId?: string) => void;
   saved: SavedThumbnail[];
   onLoadSaved: (id: string) => void;
   onDeleteSaved: (id: string) => void;
@@ -25,11 +66,13 @@ export default function LeftSidebar(props: Props) {
   const [tab, setTab] = useState<Tab>("upload");
 
   return (
-    <div className="w-[320px] shrink-0 border-r border-zinc-800 bg-zinc-900 flex">
+    <div className="w-[340px] shrink-0 border-r border-zinc-800 bg-zinc-900 flex">
       <div className="flex flex-col w-16 border-r border-zinc-800 bg-zinc-950/50">
         <TabBtn active={tab === "upload"} onClick={() => setTab("upload")} icon={<Upload className="w-5 h-5" />} label="背景" />
         <TabBtn active={tab === "text"} onClick={() => setTab("text")} icon={<Type className="w-5 h-5" />} label="テキスト" />
         <TabBtn active={tab === "image"} onClick={() => setTab("image")} icon={<ImageIcon className="w-5 h-5" />} label="画像" />
+        <TabBtn active={tab === "shape"} onClick={() => setTab("shape")} icon={<Shapes className="w-5 h-5" />} label="図形" />
+        <TabBtn active={tab === "template"} onClick={() => setTab("template")} icon={<LayoutTemplate className="w-5 h-5" />} label="テンプレ" />
         <TabBtn active={tab === "auto"} onClick={() => setTab("auto")} icon={<Sparkles className="w-5 h-5" />} label="AI" />
         <TabBtn active={tab === "saved"} onClick={() => setTab("saved")} icon={<FolderOpen className="w-5 h-5" />} label="保存" />
       </div>
@@ -44,7 +87,15 @@ export default function LeftSidebar(props: Props) {
         )}
         {tab === "text" && <TextPanel onAdd={props.onAddText} />}
         {tab === "image" && <ImagePanel onAdd={props.onAddImage} />}
-        {tab === "auto" && <AutoPanel onGenerate={props.onAutoGenerate} busy={props.autoBusy} />}
+        {tab === "shape" && <ShapePanel onAdd={props.onAddShape} />}
+        {tab === "template" && <TemplatePanel onApply={props.onApplyTemplate} />}
+        {tab === "auto" && (
+          <AutoPanel
+            onGenerate={props.onAutoGenerate}
+            onApply={props.onApplyAutoResult}
+            busy={props.autoBusy}
+          />
+        )}
         {tab === "saved" && <SavedPanel items={props.saved} onLoad={props.onLoadSaved} onDelete={props.onDeleteSaved} />}
       </div>
     </div>
@@ -139,8 +190,7 @@ function UploadPanel({
         </button>
         <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
           ヒント: <kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-mono text-[10px]">⌘V</kbd>
-          {" "}でどこからでも直接貼り付け可能。QuickTime Playerの「映像をコピー」や
-          スクリーンショット（<kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-mono text-[10px]">⌃⌘⇧4</kbd>）に対応。
+          {" "}でどこからでも貼り付け可。QuickTime Playerの「映像をコピー」にも対応。
         </p>
       </div>
       <div>
@@ -169,16 +219,18 @@ function UploadPanel({
 
 function TextPanel({ onAdd }: { onAdd: (text?: string, opts?: { fontSize?: number; fill?: string }) => void }) {
   const presets = [
-    { label: "見出し（特大）", text: "テキスト", fontSize: 140, fill: "#ffffff" },
-    { label: "見出し（大）", text: "テキスト", fontSize: 96, fill: "#ffffff" },
-    { label: "サブ見出し", text: "テキスト", fontSize: 64, fill: "#fde047" },
-    { label: "本文", text: "テキスト", fontSize: 40, fill: "#ffffff" },
+    { label: "見出し（特大）", text: "テキスト", fontSize: 160, fill: "#ffffff" },
+    { label: "見出し（大）", text: "テキスト", fontSize: 112, fill: "#ffffff" },
+    { label: "強調（黄）", text: "必見", fontSize: 120, fill: "#fde047" },
+    { label: "サブ見出し", text: "サブテキスト", fontSize: 72, fill: "#fde047" },
+    { label: "本文", text: "本文テキスト", fontSize: 48, fill: "#ffffff" },
+    { label: "ミニタグ", text: "タグ", fontSize: 36, fill: "#ffffff" },
   ];
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-semibold mb-2 text-zinc-200">テキストを追加</h3>
-        <p className="text-xs text-zinc-400 mb-3">追加後、キャンバス上でダブルクリックして編集できます。</p>
+        <p className="text-xs text-zinc-400 mb-3">追加後、ダブルクリックで編集できます。</p>
         <button
           onClick={() => onAdd()}
           className="w-full px-3 py-2.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium flex items-center justify-center gap-1.5"
@@ -194,9 +246,10 @@ function TextPanel({ onAdd }: { onAdd: (text?: string, opts?: { fontSize?: numbe
             <button
               key={p.label}
               onClick={() => onAdd(p.text, { fontSize: p.fontSize, fill: p.fill })}
-              className="w-full text-left px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-sm"
+              className="w-full text-left px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-sm flex items-center justify-between"
             >
-              {p.label}
+              <span>{p.label}</span>
+              <span className="text-[10px] text-zinc-500 font-mono">{p.fontSize}px</span>
             </button>
           ))}
         </div>
@@ -238,77 +291,487 @@ function ImagePanel({ onAdd }: { onAdd: (src: string, w: number, h: number) => v
   );
 }
 
+function ShapePanel({
+  onAdd,
+}: {
+  onAdd: (
+    shape: ShapeKind,
+    opts?: Partial<{ fill: string; cornerRadius: number; width: number; height: number }>
+  ) => void;
+}) {
+  const colors = [
+    "#fde047",
+    "#fb923c",
+    "#ef4444",
+    "#ec4899",
+    "#a855f7",
+    "#3b82f6",
+    "#22c55e",
+    "#ffffff",
+    "#0f172a",
+  ];
+  const [fill, setFill] = useState("#fde047");
+
+  const quickShapes: { label: string; icon: React.ReactNode; shape: ShapeKind; cornerRadius: number; w: number; h: number }[] = [
+    { label: "四角", icon: <Square className="w-5 h-5" />, shape: "rect", cornerRadius: 0, w: 400, h: 200 },
+    { label: "角丸", icon: <Square className="w-5 h-5 rounded-md" />, shape: "rect", cornerRadius: 32, w: 400, h: 200 },
+    { label: "Pill", icon: <div className="w-6 h-3 rounded-full bg-current" />, shape: "rect", cornerRadius: 100, w: 400, h: 120 },
+    { label: "楕円", icon: <Circle className="w-5 h-5" />, shape: "ellipse", cornerRadius: 0, w: 320, h: 320 },
+    { label: "帯", icon: <div className="w-6 h-2 bg-current" />, shape: "rect", cornerRadius: 0, w: 1280, h: 120 },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold mb-2 text-zinc-200">図形を追加</h3>
+        <p className="text-xs text-zinc-400 mb-3">
+          文字の下に敷く強調帯や、数字を囲む円などに。
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {quickShapes.map((s) => (
+            <button
+              key={s.label}
+              onClick={() => onAdd(s.shape, { cornerRadius: s.cornerRadius, fill, width: s.w, height: s.h })}
+              className="aspect-square rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 flex flex-col items-center justify-center gap-1 text-zinc-300"
+              style={{ color: fill }}
+            >
+              {s.icon}
+              <span className="text-[10px] text-zinc-400">{s.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold mb-2 text-zinc-400 uppercase tracking-wider">デフォルトの色</h3>
+        <div className="grid grid-cols-9 gap-1">
+          {colors.map((c) => (
+            <button
+              key={c}
+              onClick={() => setFill(c)}
+              className={cn(
+                "aspect-square rounded border-2 transition-transform",
+                fill === c ? "border-violet-500 scale-110" : "border-zinc-700"
+              )}
+              style={{ background: c }}
+              title={c}
+            />
+          ))}
+        </div>
+        <div className="flex gap-2 mt-2 items-center">
+          <input
+            type="color"
+            value={fill}
+            onChange={(e) => setFill(e.target.value)}
+            className="w-9 h-9 rounded cursor-pointer bg-transparent border border-zinc-700"
+          />
+          <input
+            type="text"
+            value={fill}
+            onChange={(e) => setFill(e.target.value)}
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplatePanel({ onApply }: { onApply: (id: string) => void }) {
+  const [tagFilter, setTagFilter] = useState<string>("all");
+
+  // Group by layoutId → list of (one entry per theme)
+  const groups = LAYOUT_META.map((l) => ({
+    layout: l,
+    variants: TEMPLATES.filter((t) => t.layoutId === l.id),
+  })).filter((g) => tagFilter === "all" || g.layout.tag === tagFilter);
+
+  const allTags = Array.from(new Set(LAYOUT_META.map((l) => l.tag)));
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold mb-1 text-zinc-200 flex items-center gap-1.5">
+          <LayoutTemplate className="w-4 h-4" />
+          デザインテンプレート
+        </h3>
+        <p className="text-xs text-zinc-400 leading-snug">
+          {TEMPLATES.length}パターン（レイアウト {LAYOUT_META.length} × カラー{" "}
+          {TEMPLATES.length / LAYOUT_META.length}）。カラーチップをクリックで適用、テキストは後から編集できます。
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-1">
+        <FilterPill active={tagFilter === "all"} onClick={() => setTagFilter("all")}>
+          すべて
+        </FilterPill>
+        {allTags.map((tag) => (
+          <FilterPill key={tag} active={tagFilter === tag} onClick={() => setTagFilter(tag)}>
+            {tag}
+          </FilterPill>
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {groups.map(({ layout, variants }) => (
+          <div key={layout.id} className="rounded-md border border-zinc-800 bg-zinc-900/50 p-2.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[12px] font-semibold text-zinc-100">
+                {layout.label}
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                {layout.tag}
+              </span>
+            </div>
+            <p className="text-[10px] text-zinc-500 leading-snug mb-1.5">
+              {layout.desc}
+            </p>
+            <div className="grid grid-cols-5 gap-1">
+              {variants.map((t) => (
+                <TemplateSwatch key={t.id} t={t} onClick={() => onApply(t.id)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FilterPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "px-2 py-0.5 rounded-full text-[10px] border transition-colors",
+        active
+          ? "bg-violet-500/25 border-violet-500 text-violet-100"
+          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TemplateSwatch({ t, onClick }: { t: TemplateDef; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={`${t.themeLabel} / ${t.layoutLabel}`}
+      className="group relative rounded border border-zinc-700 hover:border-violet-500 overflow-hidden h-11 transition-colors"
+    >
+      <div className="flex h-full">
+        {t.swatch.map((c, i) => (
+          <div key={i} className="flex-1" style={{ background: c }} />
+        ))}
+      </div>
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/65 flex items-center justify-center transition-opacity px-1">
+        <span className="text-[9px] text-white font-medium text-center leading-tight truncate">
+          {t.themeLabel}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 function AutoPanel({
   onGenerate,
+  onApply,
   busy,
 }: {
-  onGenerate: (product: string, url: string, style: string) => Promise<void>;
+  onGenerate: (opts: { product: string; url: string; style: string; mode: "research" | "simple" }) => Promise<AutoResult | null>;
+  onApply: (res: AutoResult, templateId?: string) => void;
   busy?: boolean;
 }) {
   const [product, setProduct] = useState("");
   const [url, setUrl] = useState("");
   const [style, setStyle] = useState("インパクト重視");
+  const [result, setResult] = useState<AutoResult | null>(null);
+  const [mode, setMode] = useState<"research" | "simple">("research");
+
+  const selectedPhrases = useResearchPhraseState(result);
+
+  const allPhrases = () => selectedPhrases.selected;
 
   return (
-    <form
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!product.trim()) return;
-        await onGenerate(product.trim(), url.trim(), style);
-      }}
-      className="space-y-4"
-    >
+    <div className="space-y-4">
       <div>
         <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5 text-zinc-200">
           <Sparkles className="w-4 h-4 text-violet-400" />
           AI オートモード
         </h3>
-        <p className="text-xs text-zinc-400">商品名と参考URLからAIがサムネイル用の日本語テキストを自動生成します。</p>
+        <p className="text-xs text-zinc-400">
+          商品名を入れるとAIがリサーチして、<br />特徴・数字・評価を
+          <strong className="text-violet-300">複数の短文</strong>で返します。必要なフレーズを選んで配置。
+        </p>
       </div>
-      <div>
-        <label className="block text-xs font-medium mb-1 text-zinc-300">商品名 / 動画テーマ *</label>
-        <input
-          value={product}
-          onChange={(e) => setProduct(e.target.value)}
-          placeholder="例: ワイヤレスノイズキャンセリングイヤホン"
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-xs font-medium mb-1 text-zinc-300">参考URL（任意）</label>
-        <input
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://..."
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
-        />
-        <p className="text-[10px] text-zinc-500 mt-1">公式サイトのURLを入れると特徴を反映します</p>
-      </div>
-      <div>
-        <label className="block text-xs font-medium mb-1 text-zinc-300">スタイル</label>
-        <select
-          value={style}
-          onChange={(e) => setStyle(e.target.value)}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm"
-        >
-          <option>インパクト重視</option>
-          <option>やわらかポップ</option>
-          <option>高級感</option>
-          <option>レビュー系</option>
-          <option>解説系</option>
-        </select>
-      </div>
-      <button
-        type="submit"
-        disabled={busy || !product.trim()}
-        className="w-full px-3 py-2.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1.5"
+
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!product.trim()) return;
+          const r = await onGenerate({
+            product: product.trim(),
+            url: url.trim(),
+            style,
+            mode,
+          });
+          if (r) setResult(r);
+        }}
+        className="space-y-3"
       >
-        <Sparkles className="w-4 h-4" />
-        {busy ? "生成中..." : "テキストを生成して配置"}
-      </button>
-    </form>
+        <div>
+          <label className="block text-xs font-medium mb-1 text-zinc-300">商品名 / 動画テーマ *</label>
+          <input
+            value={product}
+            onChange={(e) => setProduct(e.target.value)}
+            placeholder="例: ソニー WH-1000XM5"
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1 text-zinc-300">参考URL（任意・精度UP）</label>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://..."
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+          />
+          <p className="text-[10px] text-zinc-500 mt-1">
+            公式サイトやAmazon商品ページを入れると精度が大幅UP
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-medium mb-1 text-zinc-300">スタイル</label>
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs"
+            >
+              <option>インパクト重視</option>
+              <option>やわらかポップ</option>
+              <option>高級感</option>
+              <option>レビュー系</option>
+              <option>解説系</option>
+              <option>比較系</option>
+              <option>ニュース系</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1 text-zinc-300">モード</label>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "research" | "simple")}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs"
+            >
+              <option value="research">リサーチ(強)</option>
+              <option value="simple">シンプル(速)</option>
+            </select>
+          </div>
+        </div>
+        <button
+          type="submit"
+          disabled={busy || !product.trim()}
+          className="w-full px-3 py-2.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1.5"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {busy ? "AIがリサーチ中..." : "リサーチ＆生成"}
+        </button>
+      </form>
+
+      {result && (
+        <div className="space-y-3 border-t border-zinc-800 pt-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold text-zinc-300">生成結果</h4>
+            <button
+              onClick={() => setResult(null)}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300"
+            >
+              クリア
+            </button>
+          </div>
+
+          <PhraseGroup
+            label="メイン"
+            phrases={pickOne(result.headline ?? result.mainText)}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="violet"
+          />
+          <PhraseGroup
+            label="サブ"
+            phrases={pickOne(result.subHeadline ?? result.subText)}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="blue"
+          />
+          <PhraseGroup
+            label="特徴"
+            phrases={result.features ?? []}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="emerald"
+          />
+          <PhraseGroup
+            label="数字"
+            phrases={result.stats ?? []}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="amber"
+          />
+          <PhraseGroup
+            label="評価"
+            phrases={result.verdicts ?? []}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="rose"
+          />
+          <PhraseGroup
+            label="アクセント"
+            phrases={pickOne(result.accent ?? result.accentText)}
+            selected={selectedPhrases.selected}
+            onToggle={selectedPhrases.toggle}
+            accent="pink"
+          />
+
+          <div className="space-y-2 pt-1">
+            <button
+              onClick={() => onApply(result)}
+              className="w-full px-3 py-2 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium"
+            >
+              選択したフレーズをキャンバスに配置
+            </button>
+            <div>
+              <div className="text-[10px] text-zinc-500 mb-1">
+                選んだフレーズをテンプレートに適用（レイアウト別）
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {DEFAULT_TEMPLATES_PER_LAYOUT.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      // Override result's phrases with the user's selection order
+                      onApply(
+                        {
+                          ...result,
+                          headline: allPhrases()[0],
+                          subHeadline: allPhrases()[1],
+                          features: allPhrases().slice(2),
+                        },
+                        t.id
+                      );
+                    }}
+                    title={`${t.layoutLabel} — ${t.desc}`}
+                    className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-200 border border-zinc-700 text-left truncate"
+                  >
+                    {t.layoutLabel}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-1 leading-snug">
+                カラーバリエーション（{TEMPLATES.length}種類）は「テンプレ」タブから選べます。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function pickOne(v: string | undefined): string[] {
+  return v && v.trim() ? [v] : [];
+}
+
+function useResearchPhraseState(result: AutoResult | null) {
+  // "Reset state when prop changes" per React docs: store the input alongside
+  // derived state and detect the change during render. React allows setState
+  // during render for this specific pattern (schedules a re-render before
+  // committing), and it's cheaper than a useEffect.
+  const [state, setState] = useState<{ result: AutoResult | null; selected: string[] }>({
+    result: null,
+    selected: [],
+  });
+  if (state.result !== result) {
+    const defaults: string[] = [];
+    if (result?.headline) defaults.push(result.headline);
+    if (result?.mainText) defaults.push(result.mainText);
+    if (result?.subHeadline) defaults.push(result.subHeadline);
+    if (result?.subText) defaults.push(result.subText);
+    (result?.features ?? []).slice(0, 3).forEach((p) => defaults.push(p));
+    setState({ result, selected: defaults });
+  }
+
+  const toggle = (phrase: string) => {
+    setState((cur) => ({
+      result: cur.result,
+      selected: cur.selected.includes(phrase)
+        ? cur.selected.filter((p) => p !== phrase)
+        : [...cur.selected, phrase],
+    }));
+  };
+
+  return { selected: state.selected, toggle };
+}
+
+function PhraseGroup({
+  label,
+  phrases,
+  selected,
+  onToggle,
+  accent,
+}: {
+  label: string;
+  phrases: string[];
+  selected: string[];
+  onToggle: (p: string) => void;
+  accent: "violet" | "blue" | "emerald" | "amber" | "rose" | "pink";
+}) {
+  if (phrases.length === 0) return null;
+  const accentClasses: Record<typeof accent, string> = {
+    violet: "bg-violet-500/20 border-violet-500 text-violet-100",
+    blue: "bg-blue-500/20 border-blue-500 text-blue-100",
+    emerald: "bg-emerald-500/20 border-emerald-500 text-emerald-100",
+    amber: "bg-amber-500/20 border-amber-500 text-amber-100",
+    rose: "bg-rose-500/20 border-rose-500 text-rose-100",
+    pink: "bg-pink-500/20 border-pink-500 text-pink-100",
+  };
+  return (
+    <div>
+      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {phrases.map((p) => {
+          const on = selected.includes(p);
+          return (
+            <button
+              key={p}
+              onClick={() => onToggle(p)}
+              className={cn(
+                "px-2 py-1 rounded-md text-xs border whitespace-pre-wrap text-left",
+                on
+                  ? accentClasses[accent]
+                  : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+              )}
+            >
+              {p}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -332,6 +795,7 @@ function SavedPanel({
             <li key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-800/50 overflow-hidden">
               <button onClick={() => onLoad(it.id)} className="w-full text-left hover:bg-zinc-800">
                 {it.preview && (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={it.preview} alt={it.name} className="w-full aspect-video object-cover" />
                 )}
                 <div className="px-2.5 py-2">

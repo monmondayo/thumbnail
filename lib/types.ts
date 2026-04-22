@@ -6,6 +6,16 @@ export type BaseElement = {
   scaleX: number;
   scaleY: number;
   visible: boolean;
+  opacity?: number;
+};
+
+export type GradientStop = { offset: number; color: string };
+
+export type GradientConfig = {
+  enabled: boolean;
+  type: "linear" | "radial";
+  angle: number; // degrees, linear only
+  stops: GradientStop[];
 };
 
 export type TextElement = BaseElement & {
@@ -20,12 +30,15 @@ export type TextElement = BaseElement & {
   align: "left" | "center" | "right";
   width: number;
   lineHeight: number;
+  letterSpacing?: number;
   shadowEnabled: boolean;
   shadowColor: string;
   shadowBlur: number;
   shadowOffsetX: number;
   shadowOffsetY: number;
   shadowOpacity: number;
+  /** Optional gradient fill. When enabled overrides the solid `fill`. */
+  gradient?: GradientConfig;
 };
 
 export type ImageElement = BaseElement & {
@@ -34,9 +47,30 @@ export type ImageElement = BaseElement & {
   width: number;
   height: number;
   isBackground?: boolean;
+  cornerRadius?: number;
 };
 
-export type EditorElement = TextElement | ImageElement;
+export type ShapeKind = "rect" | "ellipse";
+
+export type ShapeElement = BaseElement & {
+  type: "shape";
+  shape: ShapeKind;
+  width: number;
+  height: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  cornerRadius: number;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  shadowOpacity?: number;
+  gradient?: GradientConfig;
+};
+
+export type EditorElement = TextElement | ImageElement | ShapeElement;
 
 export type EditorState = {
   elements: EditorElement[];
