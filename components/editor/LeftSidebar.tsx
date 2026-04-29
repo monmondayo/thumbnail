@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   Image as ImageIcon,
   Type,
@@ -775,6 +775,54 @@ function PhraseGroup({
   );
 }
 
+function useLocalStorageUsage() {
+  const [usedBytes, setUsedBytes] = useState(0);
+
+  useEffect(() => {
+    const calc = () => {
+      if (typeof window === "undefined") return;
+      let total = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i) ?? "";
+        const val = localStorage.getItem(key) ?? "";
+        total += (key.length + val.length) * 2; // UTF-16: 2 bytes per char
+      }
+      setUsedBytes(total);
+    };
+    calc();
+  }, []);
+
+  return usedBytes;
+}
+
+function StorageUsageBar({ usedBytes }: { usedBytes: number }) {
+  const LIMIT = 5 * 1024 * 1024; // 5 MB (typical localStorage limit)
+  const pct = Math.min((usedBytes / LIMIT) * 100, 100);
+  const usedKB = (usedBytes / 1024).toFixed(1);
+  const limitMB = (LIMIT / 1024 / 1024).toFixed(0);
+  const color = pct >= 90 ? "bg-rose-500" : pct >= 70 ? "bg-amber-400" : "bg-violet-500";
+
+  return (
+    <div className="mb-3 p-2.5 rounded-lg bg-zinc-800/60 border border-zinc-700">
+      <div className="flex justify-between text-[10px] text-zinc-400 mb-1.5">
+        <span>保存容量の使用状況</span>
+        <span>{usedKB} KB / {limitMB} MB</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-zinc-700 overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all", color)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {pct >= 90 && (
+        <p className="text-[10px] text-rose-400 mt-1.5">
+          容量がほぼ満杯です。古いデータを削除してください。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SavedPanel({
   items,
   onLoad,
@@ -784,8 +832,11 @@ function SavedPanel({
   onLoad: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const usedBytes = useLocalStorageUsage();
+
   return (
     <div>
+      <StorageUsageBar usedBytes={usedBytes} />
       <h3 className="text-sm font-semibold mb-3 text-zinc-200">保存済みサムネイル</h3>
       {items.length === 0 ? (
         <p className="text-xs text-zinc-500 text-center py-6">まだ保存されたものはありません。</p>
