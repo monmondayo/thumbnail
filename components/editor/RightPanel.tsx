@@ -30,10 +30,15 @@ import { cn } from "@/lib/utils";
 type Props = {
   elements: EditorElement[];
   selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  selectedIds: string[];
+  onSelect: (id: string | null, opts?: { additive?: boolean }) => void;
   onUpdate: (id: string, patch: Partial<EditorElement>) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onDeleteSelection: () => void;
+  onDuplicateSelection: () => void;
+  onTextAlignSelection: (align: TextElement["align"]) => void;
+  onAlignObjects: (mode: "left" | "center" | "right" | "top" | "middle" | "bottom") => void;
   onReorder: (id: string, direction: "up" | "down" | "top" | "bottom") => void;
   onToggleVisibility: (id: string) => void;
 };
@@ -41,18 +46,33 @@ type Props = {
 export default function RightPanel({
   elements,
   selectedId,
+  selectedIds,
   onSelect,
   onUpdate,
   onDelete,
   onDuplicate,
+  onDeleteSelection,
+  onDuplicateSelection,
+  onTextAlignSelection,
+  onAlignObjects,
   onReorder,
   onToggleVisibility,
 }: Props) {
   const selected = useMemo(() => elements.find((e) => e.id === selectedId) ?? null, [elements, selectedId]);
+  const selectedCount = selectedIds.length;
 
   return (
     <div className="w-[300px] shrink-0 border-l border-zinc-800 bg-zinc-900 flex flex-col">
       <div className="flex-1 overflow-y-auto">
+        {selectedCount > 0 && (
+          <BulkActions
+            selectedCount={selectedCount}
+            onDeleteSelection={onDeleteSelection}
+            onDuplicateSelection={onDuplicateSelection}
+            onTextAlignSelection={onTextAlignSelection}
+            onAlignObjects={onAlignObjects}
+          />
+        )}
         {selected ? (
           <Properties
             element={selected}
@@ -79,8 +99,12 @@ export default function RightPanel({
                 <LayerRow
                   key={el.id}
                   el={el}
-                  selected={el.id === selectedId}
-                  onSelect={() => onSelect(el.id)}
+                  selected={selectedIds.includes(el.id)}
+                  onSelect={(evt) =>
+                    onSelect(el.id, {
+                      additive: evt.shiftKey || evt.metaKey || evt.ctrlKey,
+                    })
+                  }
                   onToggle={() => onToggleVisibility(el.id)}
                   onDelete={() => onDelete(el.id)}
                   onDuplicate={() => onDuplicate(el.id)}
@@ -108,7 +132,7 @@ function LayerRow({
 }: {
   el: EditorElement;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (evt: React.MouseEvent<HTMLLIElement>) => void;
   onToggle: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -226,6 +250,61 @@ function Properties({
       ) : (
         <ImageProperties element={element} onUpdate={onUpdate} />
       )}
+    </div>
+  );
+}
+
+function BulkActions({
+  selectedCount,
+  onDeleteSelection,
+  onDuplicateSelection,
+  onTextAlignSelection,
+  onAlignObjects,
+}: {
+  selectedCount: number;
+  onDeleteSelection: () => void;
+  onDuplicateSelection: () => void;
+  onTextAlignSelection: (align: TextElement["align"]) => void;
+  onAlignObjects: (mode: "left" | "center" | "right" | "top" | "middle" | "bottom") => void;
+}) {
+  return (
+    <div className="px-4 pt-3 pb-2 border-b border-zinc-800 space-y-3 bg-zinc-950/20">
+      <div className="text-xs text-zinc-400">{selectedCount} 件選択中（Shift/Cmd/Ctrl+クリックで複数選択）</div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={onDuplicateSelection}
+          className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded px-2 py-1.5"
+        >
+          選択を複製
+        </button>
+        <button
+          onClick={onDeleteSelection}
+          className="text-xs bg-zinc-800 hover:bg-rose-500/20 text-rose-300 rounded px-2 py-1.5"
+        >
+          選択を削除
+        </button>
+      </div>
+
+      <div>
+        <div className="text-[10px] text-zinc-500 mb-1">テキスト揃え（選択中のテキストへ適用）</div>
+        <div className="grid grid-cols-3 gap-1">
+          <button onClick={() => onTextAlignSelection("left")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">左</button>
+          <button onClick={() => onTextAlignSelection("center")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">中央</button>
+          <button onClick={() => onTextAlignSelection("right")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">右</button>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] text-zinc-500 mb-1">オブジェクト整列（キャンバス基準）</div>
+        <div className="grid grid-cols-3 gap-1">
+          <button onClick={() => onAlignObjects("left")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">左</button>
+          <button onClick={() => onAlignObjects("center")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">中央</button>
+          <button onClick={() => onAlignObjects("right")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">右</button>
+          <button onClick={() => onAlignObjects("top")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">上</button>
+          <button onClick={() => onAlignObjects("middle")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">中央Y</button>
+          <button onClick={() => onAlignObjects("bottom")} className="text-xs bg-zinc-800 hover:bg-zinc-700 rounded py-1.5">下</button>
+        </div>
+      </div>
     </div>
   );
 }

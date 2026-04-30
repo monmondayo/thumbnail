@@ -23,9 +23,9 @@ import type {
 
 type Props = {
   state: EditorState;
-  selectedId: string | null;
+  selectedIds: string[];
   editingId?: string | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, opts?: { additive?: boolean }) => void;
   onChange: (el: EditorElement) => void;
   onEditText: (id: string, editor: { x: number; y: number; width: number; height: number; rotation: number }) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -34,7 +34,7 @@ type Props = {
 
 export default function Canvas({
   state,
-  selectedId,
+  selectedIds,
   editingId,
   onSelect,
   onChange,
@@ -48,19 +48,21 @@ export default function Canvas({
     const tr = transformerRef.current;
     const stage = stageRef.current;
     if (!tr || !stage) return;
-    if (!selectedId) {
+    if (selectedIds.length === 0) {
       tr.nodes([]);
       tr.getLayer()?.batchDraw();
       return;
     }
-    const node = stage.findOne<Konva.Node>(`#${selectedId}`);
-    if (node) {
-      tr.nodes([node]);
+    const nodes = selectedIds
+      .map((id) => stage.findOne<Konva.Node>(`#${id}`))
+      .filter((node): node is Konva.Node => Boolean(node));
+    if (nodes.length > 0) {
+      tr.nodes(nodes);
       tr.getLayer()?.batchDraw();
     } else {
       tr.nodes([]);
     }
-  }, [selectedId, state.elements, stageRef]);
+  }, [selectedIds, state.elements, stageRef]);
 
   return (
     <Stage
@@ -94,7 +96,11 @@ export default function Canvas({
               <ImageNode
                 key={el.id}
                 element={el}
-                onSelect={() => onSelect(el.id)}
+                onSelect={(evt) =>
+                  onSelect(el.id, {
+                    additive: evt.evt.shiftKey || evt.evt.metaKey || evt.evt.ctrlKey,
+                  })
+                }
                 onChange={onChange}
               />
             );
@@ -104,7 +110,11 @@ export default function Canvas({
               <ShapeNode
                 key={el.id}
                 element={el}
-                onSelect={() => onSelect(el.id)}
+                onSelect={(evt) =>
+                  onSelect(el.id, {
+                    additive: evt.evt.shiftKey || evt.evt.metaKey || evt.evt.ctrlKey,
+                  })
+                }
                 onChange={onChange}
               />
             );
@@ -113,7 +123,11 @@ export default function Canvas({
             <TextNode
               key={el.id}
               element={el}
-              onSelect={() => onSelect(el.id)}
+              onSelect={(evt) =>
+                onSelect(el.id, {
+                  additive: evt.evt.shiftKey || evt.evt.metaKey || evt.evt.ctrlKey,
+                })
+              }
               onChange={onChange}
               onEdit={(rect) => onEditText(el.id, rect)}
             />
@@ -183,7 +197,7 @@ function ImageNode({
   onChange,
 }: {
   element: ImageElement;
-  onSelect: () => void;
+  onSelect: (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (el: EditorElement) => void;
 }) {
   const [img] = useImage(element.src, "anonymous");
@@ -228,7 +242,7 @@ function ShapeNode({
   onChange,
 }: {
   element: ShapeElement;
-  onSelect: () => void;
+  onSelect: (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (el: EditorElement) => void;
 }) {
   const gradProps = useMemo(
@@ -322,7 +336,7 @@ function TextNode({
   onEdit,
 }: {
   element: TextElement;
-  onSelect: () => void;
+  onSelect: (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (el: EditorElement) => void;
   onEdit: (rect: { x: number; y: number; width: number; height: number; rotation: number }) => void;
 }) {

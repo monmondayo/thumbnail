@@ -9,7 +9,10 @@ export type FontOption = {
 export const JAPANESE_FONTS: FontOption[] = [
   // ─── Sans / Universal ───────────────────────────
   { label: "Noto Sans JP (標準)", family: "Noto Sans JP", cssFamily: '"Noto Sans JP", sans-serif', weights: [400, 700, 900], category: "sans" },
+  { label: "IBM Plex Sans JP", family: "IBM Plex Sans JP", cssFamily: '"IBM Plex Sans JP", sans-serif', weights: [400, 500, 700], category: "sans" },
   { label: "M PLUS 1p", family: "M PLUS 1p", cssFamily: '"M PLUS 1p", sans-serif', weights: [400, 700, 900], category: "sans" },
+  { label: "Zen Kaku Gothic New", family: "Zen Kaku Gothic New", cssFamily: '"Zen Kaku Gothic New", sans-serif', weights: [400, 500, 700, 900], category: "sans" },
+  { label: "Sawarabi Gothic", family: "Sawarabi Gothic", cssFamily: '"Sawarabi Gothic", sans-serif', weights: [400], category: "sans" },
   { label: "BIZ UDPGothic (読みやすい)", family: "BIZ UDPGothic", cssFamily: '"BIZ UDPGothic", sans-serif', weights: [400, 700], category: "sans" },
 
   // ─── Rounded ─────────────────────────────────────
@@ -40,6 +43,8 @@ export const JAPANESE_FONTS: FontOption[] = [
 
   // ─── Serif / 明朝 ────────────────────────────────
   { label: "Noto Serif JP (明朝)", family: "Noto Serif JP", cssFamily: '"Noto Serif JP", serif', weights: [400, 700, 900], category: "serif" },
+  { label: "Zen Old Mincho", family: "Zen Old Mincho", cssFamily: '"Zen Old Mincho", serif', weights: [400, 700, 900], category: "serif" },
+  { label: "Sawarabi Mincho", family: "Sawarabi Mincho", cssFamily: '"Sawarabi Mincho", serif', weights: [400], category: "serif" },
   { label: "Shippori Mincho (明朝)", family: "Shippori Mincho", cssFamily: '"Shippori Mincho", serif', weights: [400, 700, 900], category: "serif" },
   { label: "Kaisei Decol (明朝)", family: "Kaisei Decol", cssFamily: '"Kaisei Decol", serif', weights: [400, 700], category: "serif" },
   { label: "Hina Mincho (繊細明朝)", family: "Hina Mincho", cssFamily: '"Hina Mincho", serif', weights: [400], category: "serif" },
@@ -54,7 +59,10 @@ export const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?" +
   [
     "family=Noto+Sans+JP:wght@400;700;900",
+    "family=IBM+Plex+Sans+JP:wght@400;500;700",
     "family=M+PLUS+1p:wght@400;700;900",
+    "family=Zen+Kaku+Gothic+New:wght@400;500;700;900",
+    "family=Sawarabi+Gothic",
     "family=BIZ+UDPGothic:wght@400;700",
     "family=M+PLUS+Rounded+1c:wght@400;700;900",
     "family=Zen+Maru+Gothic:wght@400;700;900",
@@ -75,6 +83,8 @@ export const GOOGLE_FONTS_URL =
     "family=Yuji+Mai",
     "family=Yuji+Syuku",
     "family=Noto+Serif+JP:wght@400;700;900",
+    "family=Zen+Old+Mincho:wght@400;700;900",
+    "family=Sawarabi+Mincho",
     "family=Shippori+Mincho:wght@400;700;900",
     "family=Kaisei+Decol:wght@400;700",
     "family=Hina+Mincho",

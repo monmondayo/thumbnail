@@ -102,15 +102,40 @@ const defaultShape = (overrides: Partial<ShapeElement> = {}): ShapeElement => ({
   ...overrides,
 });
 
+function estimateFitFontSize({
+  text,
+  width,
+  max,
+  min,
+  lineHeight = 1.1,
+}: {
+  text: string;
+  width: number;
+  max: number;
+  min: number;
+  lineHeight?: number;
+}) {
+  const lines = text.split("\n").filter(Boolean);
+  const longest = Math.max(...lines.map((line) => line.trim().length), 1);
+  const lineCount = Math.max(lines.length, 1);
+  const widthBased = Math.floor(width / Math.max(longest * 0.92, 1));
+  const heightBudget = lineCount >= 4 ? 0.72 : lineCount === 3 ? 0.84 : lineCount === 2 ? 1 : 1.08;
+  const heightBased = Math.floor((CANVAS_H * heightBudget) / Math.max(lineCount * lineHeight, 1));
+  return Math.max(min, Math.min(max, widthBased, heightBased));
+}
+
 export default function Editor() {
   const [state, setState] = useState<EditorState>(initialState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [docId, setDocId] = useState<string>(() => uid());
   const [name, setName] = useState("無題のサムネイル");
   const [saving, setSaving] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
-  const [saved, setSaved] = useState<SavedThumbnail[]>([]);
+  const [saved, setSaved] = useState<SavedThumbnail[]>(() => listSaved());
   const [stageScale, setStageScale] = useState(1);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [textEdit, setTextEdit] = useState<
     | {
         id: string;
@@ -132,6 +157,8 @@ export default function Editor() {
     historyRef.current.push(prev);
     if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
     futureRef.current = [];
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(false);
     setHistoryTick((t) => t + 1);
   }, []);
 
@@ -146,11 +173,51 @@ export default function Editor() {
     [pushHistory]
   );
 
+  const clearSelection = useCallback(() => {
+    setSelectedId(null);
+    setSelectedIds([]);
+  }, []);
+
+  const selectSingle = useCallback((id: string | null) => {
+    if (!id) {
+      clearSelection();
+      return;
+    }
+    setSelectedId(id);
+    setSelectedIds([id]);
+  }, [clearSelection]);
+
+  const selectFromCanvas = useCallback(
+    (id: string | null, opts?: { additive?: boolean }) => {
+      if (!id) {
+        clearSelection();
+        return;
+      }
+      if (!opts?.additive) {
+        selectSingle(id);
+        return;
+      }
+      setSelectedIds((prev) => {
+        if (prev.includes(id)) {
+          const next = prev.filter((v) => v !== id);
+          setSelectedId(next[next.length - 1] ?? null);
+          return next;
+        }
+        const next = [...prev, id];
+        setSelectedId(id);
+        return next;
+      });
+    },
+    [clearSelection, selectSingle]
+  );
+
   const undo = useCallback(() => {
     setState((prev) => {
       const last = historyRef.current.pop();
       if (!last) return prev;
       futureRef.current.push(prev);
+      setCanUndo(historyRef.current.length > 0);
+      setCanRedo(futureRef.current.length > 0);
       setHistoryTick((t) => t + 1);
       return last;
     });
@@ -161,14 +228,11 @@ export default function Editor() {
       const next = futureRef.current.pop();
       if (!next) return prev;
       historyRef.current.push(prev);
+      setCanUndo(historyRef.current.length > 0);
+      setCanRedo(futureRef.current.length > 0);
       setHistoryTick((t) => t + 1);
       return next;
     });
-  }, []);
-
-  // Load saved list
-  useEffect(() => {
-    setSaved(listSaved());
   }, []);
 
   // Fit canvas to container
@@ -212,9 +276,9 @@ export default function Editor() {
         ...(opts?.fill ? { fill: opts.fill } : {}),
       });
       commit((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(el.id);
+      selectSingle(el.id);
     },
-    [commit]
+    [commit, selectSingle]
   );
 
   const addImage = useCallback(
@@ -238,9 +302,9 @@ export default function Editor() {
         opacity: 1,
       };
       commit((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(el.id);
+      selectSingle(el.id);
     },
-    [commit]
+    [commit, selectSingle]
   );
 
   const addShape = useCallback(
@@ -259,9 +323,9 @@ export default function Editor() {
       el.x = (CANVAS_W - el.width) / 2;
       el.y = (CANVAS_H - el.height) / 2;
       commit((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(el.id);
+      selectSingle(el.id);
     },
-    [commit]
+    [commit, selectSingle]
   );
 
   const setBackground = useCallback(
@@ -290,9 +354,9 @@ export default function Editor() {
         );
         return { ...s, elements: [el, ...filtered] };
       });
-      setSelectedId(el.id);
+      selectSingle(el.id);
     },
-    [commit]
+    [commit, selectSingle]
   );
 
   const updateElement = useCallback(
@@ -310,10 +374,18 @@ export default function Editor() {
   const deleteElement = useCallback(
     (id: string) => {
       commit((s) => ({ ...s, elements: s.elements.filter((e) => e.id !== id) }));
+      setSelectedIds((cur) => cur.filter((v) => v !== id));
       setSelectedId((cur) => (cur === id ? null : cur));
     },
     [commit]
   );
+
+  const deleteSelection = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const ids = new Set(selectedIds);
+    commit((s) => ({ ...s, elements: s.elements.filter((e) => !ids.has(e.id)) }));
+    clearSelection();
+  }, [selectedIds, commit, clearSelection]);
 
   const duplicateElement = useCallback(
     (id: string) => {
@@ -331,9 +403,77 @@ export default function Editor() {
         newId = copy.id;
         return { ...s, elements: [...s.elements, copy] };
       });
-      if (newId) setSelectedId(newId);
+      if (newId) selectSingle(newId);
     },
-    [commit]
+    [commit, selectSingle]
+  );
+
+  const duplicateSelection = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const selected = new Set(selectedIds);
+    const newIds: string[] = [];
+    commit((s) => {
+      const copies: EditorElement[] = [];
+      for (const el of s.elements) {
+        if (!selected.has(el.id)) continue;
+        const copy: EditorElement = {
+          ...el,
+          id: uid(),
+          x: el.x + 30,
+          y: el.y + 30,
+          ...(el.type === "image" ? { isBackground: false } : {}),
+        };
+        copies.push(copy);
+        newIds.push(copy.id);
+      }
+      return { ...s, elements: [...s.elements, ...copies] };
+    });
+    if (newIds.length > 0) {
+      setSelectedIds(newIds);
+      setSelectedId(newIds[newIds.length - 1]);
+    }
+  }, [selectedIds, commit]);
+
+  const setTextAlignForSelection = useCallback(
+    (align: TextElement["align"]) => {
+      if (selectedIds.length === 0) return;
+      const ids = new Set(selectedIds);
+      commit((s) => ({
+        ...s,
+        elements: s.elements.map((e) => {
+          if (!ids.has(e.id) || e.type !== "text") return e;
+          return { ...e, align };
+        }),
+      }));
+    },
+    [selectedIds, commit]
+  );
+
+  const alignObjects = useCallback(
+    (mode: "left" | "center" | "right" | "top" | "middle" | "bottom") => {
+      if (selectedIds.length === 0) return;
+      const ids = new Set(selectedIds);
+      commit((s) => ({
+        ...s,
+        elements: s.elements.map((e) => {
+          if (!ids.has(e.id)) return e;
+          const w = e.type === "text" ? e.width * e.scaleX : e.width * e.scaleX;
+          const h = e.type === "text"
+            ? e.fontSize * e.lineHeight * Math.max(1, e.text.split("\n").length) * e.scaleY
+            : e.height * e.scaleY;
+          let x = e.x;
+          let y = e.y;
+          if (mode === "left") x = 0;
+          if (mode === "center") x = (CANVAS_W - w) / 2;
+          if (mode === "right") x = CANVAS_W - w;
+          if (mode === "top") y = 0;
+          if (mode === "middle") y = (CANVAS_H - h) / 2;
+          if (mode === "bottom") y = CANVAS_H - h;
+          return { ...e, x, y } as EditorElement;
+        }),
+      }));
+    },
+    [selectedIds, commit]
   );
 
   const reorder = useCallback(
@@ -388,9 +528,9 @@ export default function Editor() {
         const bg = s.elements.filter((e) => e.type === "image" && e.isBackground);
         return { ...s, elements: [...bg, ...newEls] };
       });
-      setSelectedId(null);
+      clearSelection();
     },
-    [commit]
+    [commit, clearSelection]
   );
 
   // --- Auto mode ---
@@ -451,20 +591,28 @@ export default function Editor() {
         // Drop existing non-background elements
         const bg = s.elements.filter((e) => e.type === "image" && e.isBackground);
         const elems: EditorElement[] = [...bg];
+        const headlineFontSize = headline
+          ? estimateFitFontSize({ text: headline, width: CANVAS_W - 160, max: 136, min: 68, lineHeight: 1.02 })
+          : 0;
+        const subFontSize = sub
+          ? estimateFitFontSize({ text: sub, width: CANVAS_W - 160, max: 54, min: 30, lineHeight: 1.12 })
+          : 0;
 
         if (headline) {
           elems.push(
             defaultText({
               text: headline,
-              fontSize: 160,
-              fontFamily: '"Dela Gothic One", sans-serif',
+              fontSize: headlineFontSize,
+              fontFamily: '"Noto Sans JP", sans-serif',
+              fontStyle: "bold",
               fill: "#fde047",
               stroke: "#0b0b10",
-              strokeWidth: 14,
+              strokeWidth: Math.max(6, Math.round(headlineFontSize * 0.08)),
               width: CANVAS_W - 160,
               x: 80,
-              y: 140,
+              y: 96,
               align: "left",
+              lineHeight: 1.02,
             })
           );
         }
@@ -472,16 +620,17 @@ export default function Editor() {
           elems.push(
             defaultText({
               text: sub,
-              fontSize: 56,
-              fontFamily: '"M PLUS Rounded 1c", sans-serif',
+              fontSize: subFontSize,
+              fontFamily: '"Noto Sans JP", sans-serif',
               fill: "#ffffff",
               stroke: "#000000",
-              strokeWidth: 6,
+              strokeWidth: Math.max(2, Math.round(subFontSize * 0.08)),
               width: CANVAS_W - 160,
               x: 80,
-              y: 360,
+              y: 110 + headlineFontSize * Math.max(1, headline.split("\n").length) * 1.04,
               align: "left",
               fontStyle: "bold",
+              lineHeight: 1.12,
             })
           );
         }
@@ -520,8 +669,8 @@ export default function Editor() {
           elems.push(
             defaultText({
               text: f,
-              fontSize: 42,
-              fontFamily: '"M PLUS Rounded 1c", sans-serif',
+              fontSize: estimateFitFontSize({ text: f, width: pillW - 24, max: 38, min: 18, lineHeight: 1.05 }),
+              fontFamily: '"Noto Sans JP", sans-serif',
               fontStyle: "bold",
               fill: "#0f0f10",
               stroke: "transparent",
@@ -540,11 +689,12 @@ export default function Editor() {
           elems.push(
             defaultText({
               text: st,
-              fontSize: 56,
-              fontFamily: '"Dela Gothic One", sans-serif',
+              fontSize: estimateFitFontSize({ text: st, width: 520, max: 44, min: 22, lineHeight: 1.05 }),
+              fontFamily: '"Noto Sans JP", sans-serif',
+              fontStyle: "bold",
               fill: "#fff",
               stroke: "#dc2626",
-              strokeWidth: 8,
+              strokeWidth: 4,
               width: 520,
               x: CANVAS_W - 540,
               y: 40 + i * 80,
@@ -582,8 +732,9 @@ export default function Editor() {
           elems.push(
             defaultText({
               text: verdicts[0],
-              fontSize: 40,
-              fontFamily: '"Dela Gothic One", sans-serif',
+              fontSize: estimateFitFontSize({ text: verdicts[0], width: 180, max: 34, min: 18, lineHeight: 1.05 }),
+              fontFamily: '"Noto Sans JP", sans-serif',
+              fontStyle: "bold",
               fill: "#ffffff",
               stroke: "transparent",
               strokeWidth: 0,
@@ -626,8 +777,9 @@ export default function Editor() {
           elems.push(
             defaultText({
               text: accent,
-              fontSize: 40,
-              fontFamily: '"Dela Gothic One", sans-serif',
+              fontSize: estimateFitFontSize({ text: accent, width: 220, max: 28, min: 16, lineHeight: 1.05 }),
+              fontFamily: '"Noto Sans JP", sans-serif',
+              fontStyle: "bold",
               fill: "#fde047",
               stroke: "transparent",
               strokeWidth: 0,
@@ -643,9 +795,9 @@ export default function Editor() {
 
         return { ...s, elements: elems };
       });
-      setSelectedId(null);
+      clearSelection();
     },
-    [commit, applyTemplate]
+    [commit, applyTemplate, clearSelection]
   );
 
   // --- Clipboard paste → background ---
@@ -721,20 +873,19 @@ export default function Editor() {
       } else if (mod && (e.key === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
         e.preventDefault();
         redo();
-      } else if (mod && e.key.toLowerCase() === "d" && selectedId) {
+      } else if (mod && e.key.toLowerCase() === "d" && selectedIds.length > 0) {
         e.preventDefault();
-        duplicateElement(selectedId);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        duplicateSelection();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length > 0) {
         e.preventDefault();
-        deleteElement(selectedId);
+        deleteSelection();
       } else if (e.key === "Escape") {
-        setSelectedId(null);
+        clearSelection();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, undo, redo, textEdit]);
+  }, [selectedIds.length, undo, redo, textEdit, duplicateSelection, deleteSelection, clearSelection]);
 
   // --- Export / Save ---
 
@@ -754,7 +905,7 @@ export default function Editor() {
 
   const exportImage = useCallback(
     (format: "png" | "jpeg") => {
-      setSelectedId(null);
+      clearSelection();
       requestAnimationFrame(() => {
         const mime = format === "png" ? "image/png" : "image/jpeg";
         const data = makeDataURL(mime);
@@ -763,7 +914,7 @@ export default function Editor() {
         downloadDataURL(data, `${safeName}.${format}`);
       });
     },
-    [makeDataURL, name]
+    [makeDataURL, name, clearSelection]
   );
 
   const makePreview = useCallback((): string => {
@@ -779,7 +930,7 @@ export default function Editor() {
 
   const save = useCallback(async () => {
     setSaving(true);
-    setSelectedId(null);
+    clearSelection();
     await new Promise((r) => requestAnimationFrame(r));
     try {
       const preview = makePreview();
@@ -791,7 +942,7 @@ export default function Editor() {
     } finally {
       setSaving(false);
     }
-  }, [state, docId, name, makePreview]);
+  }, [state, docId, name, makePreview, clearSelection]);
 
   const load = useCallback((id: string) => {
     const item = loadSaved(id);
@@ -799,11 +950,13 @@ export default function Editor() {
     setState(item.state);
     setDocId(item.id);
     setName(item.name);
-    setSelectedId(null);
+    clearSelection();
     historyRef.current = [];
     futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
     setHistoryTick((t) => t + 1);
-  }, []);
+  }, [clearSelection]);
 
   const removeSaved = useCallback((id: string) => {
     deleteSaved(id);
@@ -813,10 +966,14 @@ export default function Editor() {
   const clearCanvas = useCallback(() => {
     if (!confirm("キャンバスをクリアしますか？（現在の編集内容は失われます）")) return;
     commit(() => initialState());
-    setSelectedId(null);
+    clearSelection();
     setDocId(uid());
     setName("無題のサムネイル");
-  }, [commit]);
+    historyRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  }, [commit, clearSelection]);
 
   // --- Inline text editing ---
   const startTextEdit = useCallback(
@@ -835,21 +992,18 @@ export default function Editor() {
     [textEdit, updateElement]
   );
 
-  const stageOffset = useMemo(() => {
-    const el = canvasHolderRef.current;
-    const stage = stageRef.current?.container();
-    if (!el || !stage) return { left: 0, top: 0 };
-    const stageRect = stage.getBoundingClientRect();
-    const holderRect = el.getBoundingClientRect();
-    return { left: stageRect.left - holderRect.left, top: stageRect.top - holderRect.top };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageScale, state.canvasWidth, state.canvasHeight, textEdit]);
-
   const editingElement = useMemo(() => {
     if (!textEdit) return null;
     const el = state.elements.find((e) => e.id === textEdit.id);
     return el && el.type === "text" ? el : null;
   }, [textEdit, state.elements]);
+
+  const handleLayerSelect = useCallback(
+    (id: string | null, evt?: { additive?: boolean }) => {
+      selectFromCanvas(id, evt);
+    },
+    [selectFromCanvas]
+  );
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
@@ -862,8 +1016,8 @@ export default function Editor() {
         onClear={clearCanvas}
         onUndo={undo}
         onRedo={redo}
-        canUndo={historyRef.current.length > 0}
-        canRedo={futureRef.current.length > 0}
+        canUndo={canUndo}
+        canRedo={canRedo}
         saving={saving}
       />
       <div className="flex-1 min-h-0 flex">
@@ -901,9 +1055,9 @@ export default function Editor() {
           >
             <Canvas
               state={state}
-              selectedId={selectedId}
+              selectedIds={selectedIds}
               editingId={textEdit?.id ?? null}
-              onSelect={setSelectedId}
+              onSelect={selectFromCanvas}
               onChange={(el) => updateElement(el.id, el)}
               onEditText={startTextEdit}
               stageRef={stageRef}
@@ -932,10 +1086,15 @@ export default function Editor() {
         <RightPanel
           elements={state.elements}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedIds={selectedIds}
+          onSelect={handleLayerSelect}
           onUpdate={updateElement}
           onDelete={deleteElement}
           onDuplicate={duplicateElement}
+          onDeleteSelection={deleteSelection}
+          onDuplicateSelection={duplicateSelection}
+          onTextAlignSelection={setTextAlignForSelection}
+          onAlignObjects={alignObjects}
           onReorder={reorder}
           onToggleVisibility={toggleVisibility}
         />

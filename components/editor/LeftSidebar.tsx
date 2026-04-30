@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import {
   Image as ImageIcon,
   Type,
@@ -16,7 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn, readFileAsDataURL, loadImageSize } from "@/lib/utils";
-import type { SavedThumbnail, ShapeKind } from "@/lib/types";
+import type { EditorElement, SavedThumbnail, ShapeKind, TextElement } from "@/lib/types";
 import {
   TEMPLATES,
   LAYOUT_META,
@@ -496,10 +496,48 @@ function AutoPanel({
   const [style, setStyle] = useState("インパクト重視");
   const [result, setResult] = useState<AutoResult | null>(null);
   const [mode, setMode] = useState<"research" | "simple">("research");
+  const [layoutFilterState, setLayoutFilterState] = useState<{
+    key: string;
+    value: string;
+  }>({ key: "", value: "all" });
 
   const selectedPhrases = useResearchPhraseState(result);
-
   const allPhrases = () => selectedPhrases.selected;
+  const previewPhrases = useMemo(
+    () => buildTemplatePreviewPhrases(result, selectedPhrases.selected),
+    [result, selectedPhrases.selected]
+  );
+  const recommendedTags = useMemo(
+    () => getRecommendedTags(style, result?.category),
+    [style, result?.category]
+  );
+  const recommendationKey = `${style}:${result?.category ?? "none"}`;
+  if (layoutFilterState.key !== recommendationKey) {
+    setLayoutFilterState({
+      key: recommendationKey,
+      value: recommendedTags[0] ?? "all",
+    });
+  }
+  const layoutFilter = layoutFilterState.value;
+
+  const previewTemplates = useMemo(
+    () => {
+      const phraseCount = previewPhrases.length;
+      const filtered = DEFAULT_TEMPLATES_PER_LAYOUT.filter(
+        (template) => layoutFilter === "all" || template.tag === layoutFilter
+      );
+      return [...filtered].sort((left, right) => {
+        const leftScore = scoreTemplateForAuto(left, phraseCount, style, result?.category);
+        const rightScore = scoreTemplateForAuto(right, phraseCount, style, result?.category);
+        return rightScore - leftScore;
+      });
+    },
+    [layoutFilter, previewPhrases.length, style, result?.category]
+  );
+  const autoTags = useMemo(
+    () => Array.from(new Set(DEFAULT_TEMPLATES_PER_LAYOUT.map((template) => template.tag))),
+    []
+  );
 
   return (
     <div className="space-y-4">
@@ -646,46 +684,277 @@ function AutoPanel({
           />
 
           <div className="space-y-2 pt-1">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-[10px] text-zinc-500">
+                  レイアウトをサムネイルから選択
+                </div>
+                <div className="text-[9px] text-zinc-600">
+                  {previewTemplates.length}件
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-2">
+                <FilterPill
+                  active={layoutFilter === "all"}
+                  onClick={() => setLayoutFilterState({ key: recommendationKey, value: "all" })}
+                >
+                  すべて
+                </FilterPill>
+                {autoTags.map((tag) => (
+                  <FilterPill key={tag} active={layoutFilter === tag} onClick={() => setLayoutFilterState({ key: recommendationKey, value: tag })}>
+                    {tag}
+                    {recommendedTags.includes(tag) ? " *" : ""}
+                  </FilterPill>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {previewTemplates.map((t) => (
+                  <TemplatePreviewCard
+                    key={t.id}
+                    template={t}
+                    phrases={previewPhrases}
+                    score={scoreTemplateForAuto(t, previewPhrases.length, style, result?.category)}
+                    onClick={() => onApply(buildSelectedResult(result, allPhrases()), t.id)}
+                  />
+                ))}
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-1.5 leading-snug">
+                クリックでそのまま配置します。現在の選択フレーズを最大6個まで反映します。`*` はスタイルに合うおすすめカテゴリです。
+              </p>
+            </div>
             <button
-              onClick={() => onApply(result)}
-              className="w-full px-3 py-2 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium"
+              onClick={() => onApply(buildSelectedResult(result, allPhrases()))}
+              className="w-full px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium border border-zinc-700"
             >
-              選択したフレーズをキャンバスに配置
+              テンプレを使わずシンプル配置
             </button>
             <div>
               <div className="text-[10px] text-zinc-500 mb-1">
-                選んだフレーズをテンプレートに適用（レイアウト別）
+                テンプレート全体の色違いはテンプレタブから選択できます
               </div>
-              <div className="grid grid-cols-2 gap-1">
-                {DEFAULT_TEMPLATES_PER_LAYOUT.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => {
-                      // Override result's phrases with the user's selection order
-                      onApply(
-                        {
-                          ...result,
-                          headline: allPhrases()[0],
-                          subHeadline: allPhrases()[1],
-                          features: allPhrases().slice(2),
-                        },
-                        t.id
-                      );
-                    }}
-                    title={`${t.layoutLabel} — ${t.desc}`}
-                    className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-200 border border-zinc-700 text-left truncate"
-                  >
-                    {t.layoutLabel}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[9px] text-zinc-600 mt-1 leading-snug">
-                カラーバリエーション（{TEMPLATES.length}種類）は「テンプレ」タブから選べます。
+              <p className="text-[9px] text-zinc-600 leading-snug">
+                現在 {DEFAULT_TEMPLATES_PER_LAYOUT.length} レイアウト / {TEMPLATES.length} パターンあります。
               </p>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function buildSelectedResult(result: AutoResult, selected: string[]): AutoResult {
+  const phrases = dedupePhrases(selected).slice(0, 6);
+  return {
+    ...result,
+    headline: phrases[0] ?? result.headline ?? result.mainText,
+    subHeadline: phrases[1] ?? result.subHeadline ?? result.subText,
+    features: phrases.slice(2),
+    stats: [],
+    verdicts: [],
+    accent: undefined,
+    accentText: undefined,
+  };
+}
+
+function buildTemplatePreviewPhrases(result: AutoResult | null, selected: string[]): string[] {
+  const fallback = [
+    result?.headline,
+    result?.mainText,
+    result?.subHeadline,
+    result?.subText,
+    ...(result?.features ?? []),
+    ...(result?.stats ?? []),
+    ...(result?.verdicts ?? []),
+    result?.accent,
+    result?.accentText,
+    "要点1",
+    "要点2",
+    "要点3",
+    "要点4",
+  ];
+  return dedupePhrases([...selected, ...fallback]).slice(0, 6);
+}
+
+function dedupePhrases(phrases: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const phrase of phrases) {
+    const normalized = phrase?.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    list.push(normalized);
+  }
+  return list;
+}
+
+function TemplatePreviewCard({
+  template,
+  phrases,
+  score,
+  onClick,
+}: {
+  template: TemplateDef;
+  phrases: string[];
+  score: number;
+  onClick: () => void;
+}) {
+  const elements = useMemo(() => {
+    let index = 0;
+    return template.build({
+      canvasWidth: 1280,
+      canvasHeight: 720,
+      uid: () => `preview-${template.id}-${index++}`,
+      phrases,
+    });
+  }, [template, phrases]);
+
+  const fit = getTemplateFit(template.layoutId);
+
+  return (
+    <button
+      onClick={onClick}
+      title={`${template.layoutLabel} — ${template.desc}`}
+      className="rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 hover:border-violet-500 hover:bg-zinc-800/70 transition-colors text-left"
+    >
+      <div className="relative aspect-video bg-zinc-950 overflow-hidden">
+        {elements.map((element) => (
+          <PreviewElement key={element.id} element={element} />
+        ))}
+        {score >= 7 && (
+          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-violet-500/85 text-[8px] font-semibold text-white">
+            おすすめ
+          </div>
+        )}
+      </div>
+      <div className="px-2.5 py-2 space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[11px] font-semibold text-zinc-100 truncate">{template.layoutLabel}</div>
+          <div className="text-[8px] px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 whitespace-nowrap">
+            {fit.label}
+          </div>
+        </div>
+        <div className="text-[9px] text-zinc-500 line-clamp-2">{template.desc}</div>
+      </div>
+    </button>
+  );
+}
+
+function getRecommendedTags(style: string, category?: AutoResult["category"]): string[] {
+  const categoryMap: Partial<Record<NonNullable<AutoResult["category"]>, string[]>> = {
+    review: ["見出し+強調", "リスト", "解説"],
+    compare: ["比較", "リスト", "解説"],
+    howto: ["解説", "リスト", "見出し+強調"],
+    ranking: ["ランキング", "見出し+強調", "リスト"],
+    news: ["見出し+強調", "見出し", "解説"],
+    explainer: ["解説", "リスト", "比較"],
+    sale: ["格安訴求", "見出し+強調", "ランキング"],
+  };
+  const styleMap: Record<string, string[]> = {
+    インパクト重視: ["見出し+強調", "ランキング", "格安訴求"],
+    やわらかポップ: ["見出し", "リスト", "見出し+強調"],
+    高級感: ["解説", "ランキング", "見出し"],
+    レビュー系: ["見出し+強調", "リスト", "解説"],
+    解説系: ["解説", "リスト", "比較"],
+    比較系: ["比較", "リスト", "解説"],
+    ニュース系: ["見出し+強調", "見出し", "ランキング"],
+  };
+  return dedupePhrases([...(category ? categoryMap[category] ?? [] : []), ...(styleMap[style] ?? ["見出し+強調", "リスト"])]);
+}
+
+function getTemplateFit(layoutId: string): { min: number; max: number; label: string } {
+  const fitMap: Record<string, { min: number; max: number; label: string }> = {
+    "centered-hero": { min: 1, max: 2, label: "1-2語向き" },
+    "bottom-bar": { min: 2, max: 3, label: "2-3語向き" },
+    "top-bar": { min: 2, max: 3, label: "2-3語向き" },
+    "corner-ribbon": { min: 2, max: 3, label: "2-3語向き" },
+    "circle-stamp": { min: 2, max: 3, label: "2-3語向き" },
+    "giant-number": { min: 2, max: 3, label: "2-3語向き" },
+    "split-compare": { min: 3, max: 4, label: "3-4語向き" },
+    "feature-3pill": { min: 3, max: 4, label: "3-4語向き" },
+    "speech-bubble": { min: 1, max: 2, label: "1-2語向き" },
+    "overlay-dark": { min: 2, max: 3, label: "2-3語向き" },
+    "stacked-cards": { min: 4, max: 6, label: "4-6語向き" },
+    "six-chip-grid": { min: 4, max: 6, label: "4-6語向き" },
+    "left-steps": { min: 4, max: 6, label: "4-6語向き" },
+    "checklist-box": { min: 4, max: 6, label: "4-6語向き" },
+    "side-pill-tower": { min: 3, max: 6, label: "3-6語向き" },
+    "bottom-ticket-row": { min: 3, max: 6, label: "3-6語向き" },
+    "right-check-column": { min: 3, max: 6, label: "3-6語向き" },
+    "top-rank-strip": { min: 3, max: 6, label: "3-6語向き" },
+  };
+  return fitMap[layoutId] ?? { min: 2, max: 4, label: "2-4語向き" };
+}
+
+function scoreTemplateForAuto(
+  template: TemplateDef,
+  phraseCount: number,
+  style: string,
+  category?: AutoResult["category"]
+): number {
+  const recommendedTags = getRecommendedTags(style, category);
+  const fit = getTemplateFit(template.layoutId);
+  let score = 0;
+  if (recommendedTags[0] === template.tag) score += 4;
+  else if (recommendedTags.includes(template.tag)) score += 2;
+  if (phraseCount >= fit.min && phraseCount <= fit.max) score += 3;
+  else score -= Math.min(Math.abs(phraseCount - fit.max), Math.abs(phraseCount - fit.min));
+  if (template.tag === "比較" && category === "compare") score += 2;
+  if (template.tag === "ランキング" && category === "ranking") score += 2;
+  if (template.tag === "格安訴求" && category === "sale") score += 2;
+  if (template.tag === "解説" && (category === "howto" || category === "explainer")) score += 2;
+  return score;
+}
+
+function PreviewElement({ element }: { element: EditorElement }) {
+  if (element.type === "image") return null;
+
+  const baseStyle = {
+    left: `${(element.x / 1280) * 100}%`,
+    top: `${(element.y / 720) * 100}%`,
+    opacity: element.opacity ?? 1,
+    transform: `rotate(${element.rotation}deg) scale(${element.scaleX}, ${element.scaleY})`,
+    transformOrigin: "top left",
+  } as const;
+
+  if (element.type === "shape") {
+    return (
+      <div
+        className="absolute"
+        style={{
+          ...baseStyle,
+          width: `${(element.width / 1280) * 100}%`,
+          height: `${(element.height / 720) * 100}%`,
+          background: element.fill,
+          border: element.strokeWidth > 0 ? `${Math.max(1, element.strokeWidth * 0.12)}px solid ${element.stroke}` : undefined,
+          borderRadius:
+            element.shape === "ellipse"
+              ? "999px"
+              : `${Math.max(2, element.cornerRadius * 0.12)}px`,
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="absolute whitespace-pre-wrap overflow-hidden leading-tight"
+      style={{
+        ...baseStyle,
+        width: `${(element.width / 1280) * 100}%`,
+        color: element.fill,
+        fontFamily: element.fontFamily,
+        fontSize: `${Math.max(6, element.fontSize * 0.1)}px`,
+        fontWeight: element.fontStyle.includes("bold") ? 700 : 400,
+        fontStyle: element.fontStyle.includes("italic") ? "italic" : "normal",
+        textAlign: element.align as TextElement["align"],
+        lineHeight: element.lineHeight,
+        textShadow: element.shadowEnabled
+          ? `0 ${Math.max(1, element.shadowOffsetY * 0.12)}px ${Math.max(1, element.shadowBlur * 0.08)}px ${element.shadowColor}`
+          : undefined,
+      }}
+    >
+      {element.text}
     </div>
   );
 }

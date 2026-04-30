@@ -6,11 +6,9 @@
  * Every (theme, layout) pair becomes a TemplateDef. Applying one returns
  * fresh EditorElements that the caller stacks on top of the current canvas.
  *
- * Note: Dela Gothic One is intentionally NOT used as any default. It's still
- * available in the font picker but feels too heavy as a baseline template
- * choice. Themes reach for Potta One, Rampart One, M PLUS 1p, Zen Maru
- * Gothic, Shippori Mincho, RocknRoll One, Reggae One, Mochiy Pop One etc.
- * depending on the mood.
+ * Note: Noto Sans JP is the neutral baseline so freshly-applied templates do
+ * not start from extra-bold pop lettering. Decorative fonts remain available
+ * as theme accents where they fit the mood.
  */
 import type {
   EditorElement,
@@ -117,7 +115,7 @@ const baseText = (patch: Partial<TextElement>): TextElement => ({
   scaleX: 1,
   scaleY: 1,
   visible: true,
-  fontFamily: F.mplus1p,
+  fontFamily: F.notoSans,
   fontSize: 140,
   fontStyle: "normal",
   fill: "#ffffff",
@@ -174,14 +172,14 @@ const THEMES: Theme[] = [
     mainFill: "#fde047",
     mainStroke: "#0f0f10",
     mainStrokeWidth: 14,
-    mainFont: F.pottaOne,
+    mainFont: F.notoSans,
     subFill: "#ffffff",
     subStroke: "#000000",
     subStrokeWidth: 6,
-    subFont: F.mplusRounded,
+    subFont: F.notoSans,
     accentBg: "#fde047",
     accentText: "#0f0f10",
-    accentFont: F.pottaOne,
+    accentFont: F.notoSans,
     darkOverlay: "#0f172a",
     darkOverlayText: "#ffffff",
     stampStops: [
@@ -996,6 +994,522 @@ const LAYOUTS: Layout[] = [
           fontFamily: t.accentFont,
         }),
       ];
+    },
+  },
+
+  // 11. stacked-cards
+  {
+    id: "stacked-cards",
+    label: "積層カード",
+    tag: "リスト",
+    desc: "見出しの下に5枚までの情報カードを重ねる。要点列挙に強い。",
+    build: (t, { canvasWidth: W, phrases = [] }) => {
+      const main = phrases[0] ?? "要点\n5枚まとめ";
+      const items = [
+        phrases[1] ?? "ポイント1",
+        phrases[2] ?? "ポイント2",
+        phrases[3] ?? "ポイント3",
+        phrases[4] ?? "ポイント4",
+        phrases[5] ?? "ポイント5",
+      ];
+      const elems: EditorElement[] = [
+        baseText({
+          text: main,
+          x: 60,
+          y: 44,
+          width: W - 120,
+          fontSize: 132,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+      ];
+      items.forEach((item, index) => {
+        const x = 90 + index * 38;
+        const y = 240 + index * 58;
+        elems.push(
+          baseShape({
+            x,
+            y,
+            width: W - 180 - index * 14,
+            height: 86,
+            cornerRadius: 22,
+            fill: index % 2 === 0 ? t.accentBg : t.darkOverlay,
+            opacity: 0.96,
+          })
+        );
+        elems.push(
+          baseText({
+            text: item,
+            x: x + 26,
+            y: y + 18,
+            width: W - 232 - index * 14,
+            align: "left",
+            fontSize: 42,
+            fill: index % 2 === 0 ? t.accentText : t.darkOverlayText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.subFont,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 12. six-chip-grid
+  {
+    id: "six-chip-grid",
+    label: "6チップグリッド",
+    tag: "リスト",
+    desc: "大見出しと2列のチップ群。6フレーズ前後をそのまま整理しやすい。",
+    build: (t, { canvasWidth: W, phrases = [] }) => {
+      const main = phrases[0] ?? "6つの\n推しポイント";
+      const chips = [
+        phrases[1] ?? "特徴1",
+        phrases[2] ?? "特徴2",
+        phrases[3] ?? "特徴3",
+        phrases[4] ?? "特徴4",
+        phrases[5] ?? "特徴5",
+      ];
+      const elems: EditorElement[] = [
+        baseText({
+          text: main,
+          x: 50,
+          y: 48,
+          width: W - 100,
+          fontSize: 144,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+      ];
+      chips.forEach((chip, index) => {
+        const col = index % 2;
+        const row = Math.floor(index / 2);
+        const x = 90 + col * 560;
+        const y = 280 + row * 116;
+        elems.push(
+          baseShape({
+            x,
+            y,
+            width: 540,
+            height: 86,
+            cornerRadius: 999,
+            fill: row === 1 ? t.darkOverlay : t.accentBg,
+          })
+        );
+        elems.push(
+          baseText({
+            text: chip,
+            x: x + 22,
+            y: y + 18,
+            width: 496,
+            fontSize: 38,
+            fill: row === 1 ? t.darkOverlayText : t.accentText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.accentFont,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 13. left-steps
+  {
+    id: "left-steps",
+    label: "左帯ステップ",
+    tag: "解説",
+    desc: "左の帯と4段ステップで整理。手順・比較メモ向け。",
+    build: (t, { canvasWidth: W, canvasHeight: H, phrases = [] }) => {
+      const main = phrases[0] ?? "手順を\n最短で理解";
+      const steps = [
+        phrases[1] ?? "STEP 1",
+        phrases[2] ?? "STEP 2",
+        phrases[3] ?? "STEP 3",
+        phrases[4] ?? "STEP 4",
+      ];
+      const tag = phrases[5] ?? "保存版";
+      const elems: EditorElement[] = [
+        baseShape({ x: 0, y: 0, width: 180, height: H, cornerRadius: 0, fill: t.accentBg, shadowEnabled: false }),
+        baseText({
+          text: tag,
+          x: 0,
+          y: 52,
+          width: 180,
+          fontSize: 44,
+          fill: t.accentText,
+          stroke: "transparent",
+          strokeWidth: 0,
+          shadowEnabled: false,
+          rotation: -90,
+          fontFamily: t.accentFont,
+        }),
+        baseText({
+          text: main,
+          x: 220,
+          y: 52,
+          width: W - 280,
+          align: "left",
+          fontSize: 120,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+      ];
+      steps.forEach((step, index) => {
+        const y = 250 + index * 104;
+        elems.push(
+          baseShape({
+            x: 240,
+            y,
+            width: W - 300,
+            height: 76,
+            cornerRadius: 18,
+            fill: index % 2 === 0 ? t.darkOverlay : t.accentBg,
+          })
+        );
+        elems.push(
+          baseText({
+            text: `${index + 1}. ${step}`,
+            x: 266,
+            y: y + 16,
+            width: W - 352,
+            align: "left",
+            fontSize: 38,
+            fill: index % 2 === 0 ? t.darkOverlayText : t.accentText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.subFont,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 14. checklist-box
+  {
+    id: "checklist-box",
+    label: "チェックリスト箱",
+    tag: "解説",
+    desc: "大枠ボックス内に5項目を整理。まとめ・要約に使いやすい。",
+    build: (t, { canvasWidth: W, canvasHeight: H, phrases = [] }) => {
+      const main = phrases[0] ?? "ここだけ\nチェック";
+      const items = [
+        phrases[1] ?? "確認1",
+        phrases[2] ?? "確認2",
+        phrases[3] ?? "確認3",
+        phrases[4] ?? "確認4",
+        phrases[5] ?? "確認5",
+      ];
+      const elems: EditorElement[] = [
+        baseShape({
+          x: 70,
+          y: 80,
+          width: W - 140,
+          height: H - 150,
+          cornerRadius: 42,
+          fill: t.darkOverlay,
+          stroke: t.accentBg,
+          strokeWidth: 6,
+          shadowBlur: 28,
+        }),
+        baseText({
+          text: main,
+          x: 120,
+          y: 120,
+          width: W - 240,
+          fontSize: 124,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+      ];
+      items.forEach((item, index) => {
+        const y = 300 + index * 70;
+        elems.push(
+          baseShape({
+            x: 130,
+            y,
+            width: 34,
+            height: 34,
+            cornerRadius: 10,
+            fill: t.accentBg,
+            shadowEnabled: false,
+          })
+        );
+        elems.push(
+          baseText({
+            text: item,
+            x: 186,
+            y: y - 2,
+            width: W - 330,
+            align: "left",
+            fontSize: 36,
+            fill: t.darkOverlayText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.subFont,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 15. side-pill-tower
+  {
+    id: "side-pill-tower",
+    label: "右ピル縦積み",
+    tag: "見出し+強調",
+    desc: "左に大見出し、右に情報ピルを縦積み。レビュー・紹介向け。",
+    build: (t, { canvasWidth: W, phrases = [] }) => {
+      const main = phrases[0] ?? "レビューで\n見るべき点";
+      const sub = phrases[1] ?? "結論先出し";
+      const pills = [phrases[2] ?? "音質", phrases[3] ?? "装着感", phrases[4] ?? "価格", phrases[5] ?? "総評"];
+      const elems: EditorElement[] = [
+        baseText({
+          text: main,
+          x: 60,
+          y: 120,
+          width: 600,
+          align: "left",
+          fontSize: 154,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+        baseText({
+          text: sub,
+          x: 60,
+          y: 420,
+          width: 560,
+          align: "left",
+          fontSize: 56,
+          fill: t.subFill,
+          stroke: t.subStroke,
+          strokeWidth: t.subStrokeWidth,
+          fontFamily: t.subFont,
+        }),
+      ];
+      pills.forEach((pill, index) => {
+        const y = 120 + index * 118;
+        elems.push(
+          baseShape({
+            x: W - 420,
+            y,
+            width: 320,
+            height: 82,
+            cornerRadius: 999,
+            fill: index % 2 === 0 ? t.accentBg : t.darkOverlay,
+          })
+        );
+        elems.push(
+          baseText({
+            text: pill,
+            x: W - 404,
+            y: y + 16,
+            width: 288,
+            fontSize: 36,
+            fill: index % 2 === 0 ? t.accentText : t.darkOverlayText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.accentFont,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 16. bottom-ticket-row
+  {
+    id: "bottom-ticket-row",
+    label: "下部チケット列",
+    tag: "格安訴求",
+    desc: "上に大見出し、下に4枚までのチケット。特典・比較・価格訴求向け。",
+    build: (t, { canvasWidth: W, canvasHeight: H, phrases = [] }) => {
+      const main = phrases[0] ?? "特典を\n一気見せ";
+      const sub = phrases[1] ?? "今だけ注目";
+      const tickets = [phrases[2] ?? "値引き", phrases[3] ?? "特典", phrases[4] ?? "期間", phrases[5] ?? "注意点"];
+      const elems: EditorElement[] = [
+        baseText({
+          text: main,
+          x: 40,
+          y: 58,
+          width: W - 80,
+          fontSize: 160,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+        baseText({
+          text: sub,
+          x: 60,
+          y: 300,
+          width: W - 120,
+          fontSize: 62,
+          fill: t.subFill,
+          stroke: t.subStroke,
+          strokeWidth: t.subStrokeWidth,
+          fontFamily: t.subFont,
+        }),
+      ];
+      tickets.forEach((ticket, index) => {
+        const x = 50 + index * 300;
+        elems.push(
+          baseShape({
+            x,
+            y: H - 200,
+            width: 270,
+            height: 118,
+            cornerRadius: 24,
+            fill: index % 2 === 0 ? t.accentBg : t.darkOverlay,
+          })
+        );
+        elems.push(
+          baseText({
+            text: ticket,
+            x: x + 18,
+            y: H - 166,
+            width: 234,
+            fontSize: 34,
+            fill: index % 2 === 0 ? t.accentText : t.darkOverlayText,
+            stroke: "transparent",
+            strokeWidth: 0,
+            shadowEnabled: false,
+            fontFamily: t.accentFont,
+            lineHeight: 1,
+          })
+        );
+      });
+      return elems;
+    },
+  },
+
+  // 17. right-check-column
+  {
+    id: "right-check-column",
+    label: "右チェック列",
+    tag: "比較",
+    desc: "左に大見出し、右にチェック列。比較ポイント整理向け。",
+    build: (t, { canvasHeight: H, phrases = [] }) => {
+      const main = phrases[0] ?? "比較で見る\n4ポイント";
+      const sub = phrases[1] ?? "最初にここを確認";
+      const items = [phrases[2] ?? "性能", phrases[3] ?? "機能", phrases[4] ?? "サイズ", phrases[5] ?? "価格"];
+      const elems: EditorElement[] = [
+        baseShape({ x: 0, y: 0, width: 420, height: H, cornerRadius: 0, fill: t.darkOverlay, opacity: 0.78, shadowEnabled: false }),
+        baseText({
+          text: main,
+          x: 54,
+          y: 90,
+          width: 310,
+          align: "left",
+          fontSize: 136,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+        baseText({
+          text: sub,
+          x: 60,
+          y: 420,
+          width: 300,
+          align: "left",
+          fontSize: 46,
+          fill: t.darkOverlayText,
+          stroke: "transparent",
+          strokeWidth: 0,
+          shadowEnabled: false,
+          fontFamily: t.subFont,
+        }),
+      ];
+      items.forEach((item, index) => {
+        const y = 112 + index * 132;
+        elems.push(baseShape({ x: 520, y, width: 88, height: 88, cornerRadius: 26, fill: t.accentBg }));
+        elems.push(baseText({
+          text: "✓",
+          x: 520,
+          y: y + 8,
+          width: 88,
+          fontSize: 52,
+          fill: t.accentText,
+          stroke: "transparent",
+          strokeWidth: 0,
+          shadowEnabled: false,
+          fontFamily: t.accentFont,
+        }));
+        elems.push(baseText({
+          text: item,
+          x: 632,
+          y: y + 16,
+          width: 560,
+          align: "left",
+          fontSize: 44,
+          fill: t.subFill,
+          stroke: t.subStroke,
+          strokeWidth: t.subStrokeWidth,
+          fontFamily: t.subFont,
+        }));
+      });
+      return elems;
+    },
+  },
+
+  // 18. top-rank-strip
+  {
+    id: "top-rank-strip",
+    label: "上部ランク帯",
+    tag: "ランキング",
+    desc: "上にランク帯、下に項目を並べる。ランキングや総合評価向け。",
+    build: (t, { canvasWidth: W, phrases = [] }) => {
+      const main = phrases[0] ?? "ランキング\n総まとめ";
+      const labels = [phrases[1] ?? "1位", phrases[2] ?? "2位", phrases[3] ?? "3位", phrases[4] ?? "注目", phrases[5] ?? "穴場"];
+      const elems: EditorElement[] = [
+        baseShape({ x: 0, y: 0, width: W, height: 150, cornerRadius: 0, fill: t.accentBg, shadowEnabled: false }),
+        baseText({
+          text: main,
+          x: 50,
+          y: 190,
+          width: W - 100,
+          fontSize: 158,
+          fill: t.mainFill,
+          stroke: t.mainStroke,
+          strokeWidth: t.mainStrokeWidth,
+          fontFamily: t.mainFont,
+        }),
+      ];
+      labels.forEach((label, index) => {
+        const x = 44 + index * 240;
+        elems.push(baseText({
+          text: label,
+          x,
+          y: 38,
+          width: 200,
+          fontSize: 42,
+          fill: t.accentText,
+          stroke: "transparent",
+          strokeWidth: 0,
+          shadowEnabled: false,
+          fontFamily: t.accentFont,
+        }));
+      });
+      return elems;
     },
   },
 ];
