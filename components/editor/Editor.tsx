@@ -15,6 +15,7 @@ import {
   uid,
 } from "@/lib/utils";
 import {
+  clearAllSaved,
   deleteSaved,
   listSaved,
   loadSaved,
@@ -38,6 +39,86 @@ const CANVAS_W = 1280;
 const CANVAS_H = 720;
 
 const HISTORY_MAX = 50;
+const LOCAL_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024;
+const SAVE_TARGET_BYTES = Math.floor(LOCAL_STORAGE_LIMIT_BYTES * 0.96);
+
+const COMPRESSION_PRESETS: Array<{ maxDimension: number; quality: number }> = [
+  { maxDimension: 2048, quality: 0.82 },
+  { maxDimension: 1600, quality: 0.74 },
+  { maxDimension: 1280, quality: 0.66 },
+  { maxDimension: 1024, quality: 0.58 },
+  { maxDimension: 900, quality: 0.5 },
+];
+
+function estimateUtf16Bytes(value: string) {
+  return value.length * 2;
+}
+
+function estimateSavedBytesWithEntry(entry: SavedThumbnail) {
+  const list = listSaved().filter((e) => e.id !== entry.id);
+  list.unshift(entry);
+  return estimateUtf16Bytes(JSON.stringify(list));
+}
+
+function isImageDataUrl(src: string) {
+  return src.startsWith("data:image/");
+}
+
+function computeScaledSize(width: number, height: number, maxDimension: number) {
+  const largest = Math.max(width, height);
+  if (largest <= maxDimension) return { width, height };
+  const ratio = maxDimension / largest;
+  return {
+    width: Math.max(1, Math.round(width * ratio)),
+    height: Math.max(1, Math.round(height * ratio)),
+  };
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function compressDataUrlToJpeg(
+  src: string,
+  preset: { maxDimension: number; quality: number }
+) {
+  try {
+    const img = await loadImage(src);
+    const size = computeScaledSize(img.width, img.height, preset.maxDimension);
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return src;
+    ctx.drawImage(img, 0, 0, size.width, size.height);
+    return canvas.toDataURL("image/jpeg", preset.quality);
+  } catch {
+    return src;
+  }
+}
+
+async function compressStateImagesOnce(
+  state: EditorState,
+  preset: { maxDimension: number; quality: number }
+): Promise<{ state: EditorState; changed: boolean }> {
+  let changed = false;
+  const nextElements = await Promise.all(
+    state.elements.map(async (el): Promise<EditorElement> => {
+      if (el.type !== "image" || !isImageDataUrl(el.src)) return el;
+      const nextSrc = await compressDataUrlToJpeg(el.src, preset);
+      if (nextSrc.length >= el.src.length) return el;
+      changed = true;
+      return { ...el, src: nextSrc };
+    })
+  );
+  if (!changed) return { state, changed: false };
+  return { state: { ...state, elements: nextElements }, changed: true };
+}
 
 const initialState = (): EditorState => ({
   elements: [],
@@ -860,6 +941,34 @@ export default function Editor() {
     }
   }, [setBackground]);
 
+  const pasteImageLayerFromClipboard = useCallback(async () => {
+    try {
+      if (!navigator.clipboard?.read) {
+        alert("このブラウザはクリップボードAPIに対応していません。⌘V で直接貼り付けてください。");
+        return;
+      }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith("image/"));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        const src = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        const { width, height } = await loadImageSize(src);
+        addImage(src, width, height);
+        return;
+      }
+      alert("クリップボードに画像がありません。");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`クリップボードの読み取りに失敗しました: ${msg}\n⌘V で直接貼り付けてみてください。`);
+    }
+  }, [addImage]);
+
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -934,7 +1043,27 @@ export default function Editor() {
     await new Promise((r) => requestAnimationFrame(r));
     try {
       const preview = makePreview();
-      const entry = snapshotState(state, docId, name, preview);
+      let workState = state;
+      let entry = snapshotState(workState, docId, name, preview);
+      let estimatedBytes = estimateSavedBytesWithEntry(entry);
+
+      if (estimatedBytes > SAVE_TARGET_BYTES) {
+        for (const preset of COMPRESSION_PRESETS) {
+          const compressed = await compressStateImagesOnce(workState, preset);
+          if (!compressed.changed) continue;
+          workState = compressed.state;
+          entry = snapshotState(workState, docId, name, preview);
+          estimatedBytes = estimateSavedBytesWithEntry(entry);
+          if (estimatedBytes <= SAVE_TARGET_BYTES) break;
+        }
+      }
+
+      if (estimatedBytes > LOCAL_STORAGE_LIMIT_BYTES) {
+        throw new Error(
+          "画像データが大きすぎるため保存できませんでした。保存済みデータを削除するか、画像サイズを小さくしてください。"
+        );
+      }
+
       saveThumbnail(entry);
       setSaved(listSaved());
     } catch (err) {
@@ -961,6 +1090,12 @@ export default function Editor() {
   const removeSaved = useCallback((id: string) => {
     deleteSaved(id);
     setSaved(listSaved());
+  }, []);
+
+  const clearAllSavedCb = useCallback(() => {
+    if (!confirm("保存済みデータをすべて削除しますか？この操作は元に戻せません。")) return;
+    clearAllSaved();
+    setSaved([]);
   }, []);
 
   const clearCanvas = useCallback(() => {
@@ -1024,6 +1159,7 @@ export default function Editor() {
         <LeftSidebar
           onSetBackground={setBackground}
           onPasteBackground={pasteFromClipboard}
+          onPasteImageLayer={pasteImageLayerFromClipboard}
           onAddText={addText}
           onAddImage={addImage}
           onAddShape={addShape}
@@ -1033,6 +1169,7 @@ export default function Editor() {
           saved={saved}
           onLoadSaved={load}
           onDeleteSaved={removeSaved}
+                    onClearAllSaved={clearAllSavedCb}
           canvasBg={state.backgroundColor}
           onCanvasBgChange={setCanvasBg}
           autoBusy={autoBusy}

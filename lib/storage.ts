@@ -33,6 +33,11 @@ export function deleteSaved(id: string) {
   localStorage.setItem(KEY, JSON.stringify(list));
 }
 
+export function clearAllSaved() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(KEY);
+}
+
 export function loadSaved(id: string): SavedThumbnail | null {
   return listSaved().find((e) => e.id === id) ?? null;
 }

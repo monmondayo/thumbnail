@@ -43,6 +43,7 @@ export type AutoResult = {
 type Props = {
   onSetBackground: (src: string, width: number, height: number) => void;
   onPasteBackground: () => Promise<void> | void;
+  onPasteImageLayer: () => Promise<void> | void;
   onAddText: (text?: string, opts?: { fontSize?: number; fill?: string }) => void;
   onAddImage: (src: string, width: number, height: number) => void;
   onAddShape: (shape: ShapeKind, opts?: Partial<{ fill: string; cornerRadius: number; width: number; height: number }>) => void;
@@ -57,6 +58,7 @@ type Props = {
   saved: SavedThumbnail[];
   onLoadSaved: (id: string) => void;
   onDeleteSaved: (id: string) => void;
+  onClearAllSaved: () => void;
   canvasBg: string;
   onCanvasBgChange: (c: string) => void;
   autoBusy?: boolean;
@@ -86,7 +88,7 @@ export default function LeftSidebar(props: Props) {
           />
         )}
         {tab === "text" && <TextPanel onAdd={props.onAddText} />}
-        {tab === "image" && <ImagePanel onAdd={props.onAddImage} />}
+        {tab === "image" && <ImagePanel onAdd={props.onAddImage} onPaste={props.onPasteImageLayer} />}
         {tab === "shape" && <ShapePanel onAdd={props.onAddShape} />}
         {tab === "template" && <TemplatePanel onApply={props.onApplyTemplate} />}
         {tab === "auto" && (
@@ -96,7 +98,7 @@ export default function LeftSidebar(props: Props) {
             busy={props.autoBusy}
           />
         )}
-        {tab === "saved" && <SavedPanel items={props.saved} onLoad={props.onLoadSaved} onDelete={props.onDeleteSaved} />}
+        {tab === "saved" && <SavedPanel items={props.saved} onLoad={props.onLoadSaved} onDelete={props.onDeleteSaved} onClearAll={props.onClearAllSaved} />}
       </div>
     </div>
   );
@@ -258,7 +260,13 @@ function TextPanel({ onAdd }: { onAdd: (text?: string, opts?: { fontSize?: numbe
   );
 }
 
-function ImagePanel({ onAdd }: { onAdd: (src: string, w: number, h: number) => void }) {
+function ImagePanel({
+  onAdd,
+  onPaste,
+}: {
+  onAdd: (src: string, w: number, h: number) => void;
+  onPaste: () => Promise<void> | void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="space-y-4">
@@ -286,6 +294,16 @@ function ImagePanel({ onAdd }: { onAdd: (src: string, w: number, h: number) => v
             if (inputRef.current) inputRef.current.value = "";
           }}
         />
+        <button
+          onClick={() => onPaste()}
+          className="mt-2 w-full px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-100 flex items-center justify-center gap-1.5 border border-zinc-700"
+        >
+          <Clipboard className="w-4 h-4" />
+          クリップボードから追加
+        </button>
+        <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
+          画像を背景ではなくレイヤーとして追加します。
+        </p>
       </div>
     </div>
   );
@@ -1044,7 +1062,7 @@ function PhraseGroup({
   );
 }
 
-function useLocalStorageUsage() {
+function useLocalStorageUsage(refreshKey: string) {
   const [usedBytes, setUsedBytes] = useState(0);
 
   useEffect(() => {
@@ -1059,13 +1077,13 @@ function useLocalStorageUsage() {
       setUsedBytes(total);
     };
     calc();
-  }, []);
+  }, [refreshKey]);
 
   return usedBytes;
 }
 
 function StorageUsageBar({ usedBytes }: { usedBytes: number }) {
-  const LIMIT = 5 * 1024 * 1024; // 5 MB (typical localStorage limit)
+  const LIMIT = 5 * 1024 * 1024; // 5 MB (localStorage の実際の上限)
   const pct = Math.min((usedBytes / LIMIT) * 100, 100);
   const usedKB = (usedBytes / 1024).toFixed(1);
   const limitMB = (LIMIT / 1024 / 1024).toFixed(0);
@@ -1096,17 +1114,30 @@ function SavedPanel({
   items,
   onLoad,
   onDelete,
+  onClearAll,
 }: {
   items: SavedThumbnail[];
   onLoad: (id: string) => void;
   onDelete: (id: string) => void;
+  onClearAll: () => void;
 }) {
-  const usedBytes = useLocalStorageUsage();
+  const usageKey = items.map((it) => `${it.id}:${it.updatedAt}`).join("|");
+  const usedBytes = useLocalStorageUsage(usageKey);
 
   return (
     <div>
       <StorageUsageBar usedBytes={usedBytes} />
-      <h3 className="text-sm font-semibold mb-3 text-zinc-200">保存済みサムネイル</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-zinc-200">保存済みサムネイル</h3>
+        {items.length > 0 && (
+          <button
+            onClick={onClearAll}
+            className="text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-2 py-0.5 rounded transition-colors"
+          >
+            すべて削除
+          </button>
+        )}
+      </div>
       {items.length === 0 ? (
         <p className="text-xs text-zinc-500 text-center py-6">まだ保存されたものはありません。</p>
       ) : (
