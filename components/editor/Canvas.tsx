@@ -201,14 +201,49 @@ function ImageNode({
   onChange: (el: EditorElement) => void;
 }) {
   const [img] = useImage(element.src, "anonymous");
+  const cropMetrics = useMemo(() => {
+    if (!img) return undefined;
+    const left = Math.max(0, Math.min(95, element.crop?.left ?? 0));
+    const right = Math.max(0, Math.min(95, element.crop?.right ?? 0));
+    const top = Math.max(0, Math.min(95, element.crop?.top ?? 0));
+    const bottom = Math.max(0, Math.min(95, element.crop?.bottom ?? 0));
+
+    const sourceX = (img.width * left) / 100;
+    const sourceY = (img.height * top) / 100;
+    const sourceWidth = Math.max(1, img.width - sourceX - (img.width * right) / 100);
+    const sourceHeight = Math.max(1, img.height - sourceY - (img.height * bottom) / 100);
+
+    // Keep pixel density by shrinking destination rect with the same crop ratio.
+    const dstX = element.x + (element.width * left) / 100;
+    const dstY = element.y + (element.height * top) / 100;
+    const dstWidth = Math.max(1, element.width * (1 - (left + right) / 100));
+    const dstHeight = Math.max(1, element.height * (1 - (top + bottom) / 100));
+
+    return {
+      crop: {
+        x: sourceX,
+        y: sourceY,
+        width: sourceWidth,
+        height: sourceHeight,
+      },
+      dst: {
+        x: dstX,
+        y: dstY,
+        width: dstWidth,
+        height: dstHeight,
+      },
+    };
+  }, [img, element.crop]);
+
   return (
     <KonvaImage
       id={element.id}
       image={img}
-      x={element.x}
-      y={element.y}
-      width={element.width}
-      height={element.height}
+      crop={cropMetrics?.crop}
+      x={cropMetrics?.dst.x ?? element.x}
+      y={cropMetrics?.dst.y ?? element.y}
+      width={cropMetrics?.dst.width ?? element.width}
+      height={cropMetrics?.dst.height ?? element.height}
       rotation={element.rotation}
       scaleX={element.scaleX}
       scaleY={element.scaleY}

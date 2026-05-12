@@ -48,6 +48,13 @@ export type ImageElement = BaseElement & {
   height: number;
   isBackground?: boolean;
   cornerRadius?: number;
+  /** Crop percentages from each edge (0-95). */
+  crop?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
 };
 
 export type ShapeKind = "rect" | "ellipse";

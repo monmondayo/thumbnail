@@ -610,6 +610,20 @@ function ImageProperties({
   element: Extract<EditorElement, { type: "image" }>;
   onUpdate: (patch: Partial<EditorElement>) => void;
 }) {
+  const crop = normalizeImageCrop(element.crop);
+  const setCropSide = (side: "top" | "right" | "bottom" | "left", value: number) => {
+    const next = { ...crop, [side]: clampPercent(value) };
+    if (next.left + next.right > 95) {
+      if (side === "left") next.right = Math.max(0, 95 - next.left);
+      else next.left = Math.max(0, 95 - next.right);
+    }
+    if (next.top + next.bottom > 95) {
+      if (side === "top") next.bottom = Math.max(0, 95 - next.top);
+      else next.top = Math.max(0, 95 - next.bottom);
+    }
+    onUpdate({ crop: next });
+  };
+
   return (
     <div className="px-4 pb-4 space-y-5">
       <Section title="画像">
@@ -629,10 +643,93 @@ function ImageProperties({
           className="w-full"
         />
       </Section>
+
+      <Section title="トリミング">
+        <div className="space-y-2">
+          <CropSlider
+            label={`上 ${crop.top}%`}
+            value={crop.top}
+            onChange={(v) => setCropSide("top", v)}
+            max={Math.max(0, 95 - crop.bottom)}
+          />
+          <CropSlider
+            label={`右 ${crop.right}%`}
+            value={crop.right}
+            onChange={(v) => setCropSide("right", v)}
+            max={Math.max(0, 95 - crop.left)}
+          />
+          <CropSlider
+            label={`下 ${crop.bottom}%`}
+            value={crop.bottom}
+            onChange={(v) => setCropSide("bottom", v)}
+            max={Math.max(0, 95 - crop.top)}
+          />
+          <CropSlider
+            label={`左 ${crop.left}%`}
+            value={crop.left}
+            onChange={(v) => setCropSide("left", v)}
+            max={Math.max(0, 95 - crop.right)}
+          />
+          <button
+            onClick={() => onUpdate({ crop: { top: 0, right: 0, bottom: 0, left: 0 } })}
+            className="w-full text-[11px] py-1 bg-zinc-800 hover:bg-zinc-700 rounded border border-zinc-700"
+          >
+            トリミングをリセット
+          </button>
+        </div>
+      </Section>
+
       <OpacitySection element={element} onUpdate={onUpdate} />
       <Transform element={element} onUpdate={onUpdate} />
     </div>
   );
+}
+
+function CropSlider({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-500 mb-0.5">{label}</div>
+      <input
+        type="range"
+        min={0}
+        max={max}
+        step={1}
+        value={Math.min(value, max)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full"
+      />
+    </div>
+  );
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(95, Math.round(value)));
+}
+
+function normalizeImageCrop(crop: Extract<EditorElement, { type: "image" }>["crop"]) {
+  const normalized = {
+    top: clampPercent(crop?.top ?? 0),
+    right: clampPercent(crop?.right ?? 0),
+    bottom: clampPercent(crop?.bottom ?? 0),
+    left: clampPercent(crop?.left ?? 0),
+  };
+  if (normalized.left + normalized.right > 95) {
+    normalized.right = Math.max(0, 95 - normalized.left);
+  }
+  if (normalized.top + normalized.bottom > 95) {
+    normalized.bottom = Math.max(0, 95 - normalized.top);
+  }
+  return normalized;
 }
 
 function OpacitySection({
